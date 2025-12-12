@@ -1,0 +1,83 @@
+# Product Form Data Example
+
+## Required Fields:
+- name (string): Product name
+- price (number): Product price in IDR
+- category (string): Product category
+
+## Optional Fields:
+- description (string): Product description
+- size (string): Product size (S, M, L, etc.)
+- quantity (number): Stock quantity
+
+## Image Upload:
+- Field name: images
+- Multiple files supported (up to 10)
+- File types: jpeg, jpg, png, gif, webp
+- Max file size: 5MB
+
+## Example Form Data (using curl):
+
+### Single Image:
+curl -X POST http://localhost:3000/api/v1/products \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "name=Premium T-Shirt" \
+  -F "description=High quality cotton t-shirt" \
+  -F "price=150000" \
+  -F "category=Clothing" \
+  -F "size=M" \
+  -F "quantity=50" \
+  -F "images=@/path/to/tshirt-front.jpg"
+
+### Multiple Images:
+curl -X POST http://localhost:3000/api/v1/products \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "name=Premium T-Shirt" \
+  -F "description=High quality cotton t-shirt" \
+  -F "price=150000" \
+  -F "category=Clothing" \
+  -F "size=M" \
+  -F "quantity=50" \
+  -F "images=@/path/to/tshirt-front.jpg" \
+  -F "images=@/path/to/tshirt-back.jpg" \
+  -F "images=@/path/to/tshirt-side.jpg"
+
+## Example Form Data (using JavaScript FormData):
+
+### Single Image:
+const formData = new FormData();
+formData.append('name', 'Premium T-Shirt');
+formData.append('description', 'High quality cotton t-shirt');
+formData.append('price', '150000');
+formData.append('category', 'Clothing');
+formData.append('size', 'M');
+formData.append('quantity', '50');
+formData.append('images', fileInput1.files[0]); // Single file
+
+fetch('/api/v1/products', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});
+
+### Multiple Images:
+const formData = new FormData();
+formData.append('name', 'Premium T-Shirt');
+formData.append('description', 'High quality cotton t-shirt');
+formData.append('price', '150000');
+formData.append('category', 'Clothing');
+formData.append('size', 'M');
+formData.append('quantity', '50');
+formData.append('images', fileInput1.files[0]); // First image
+formData.append('images', fileInput2.files[0]); // Second image
+formData.append('images', fileInput3.files[0]); // Third image
+
+fetch('/api/v1/products', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});

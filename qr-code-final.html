@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Final QR Code Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        background-color: white;
+        border-radius: 10px;
+        padding: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        text-align: center;
+      }
+      .qr-code {
+        border: 1px solid #ddd;
+        padding: 15px;
+        background-color: white;
+        display: inline-block;
+        border-radius: 5px;
+        margin: 20px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🎫 Tiket Acara Anda</h1>
+      <h2>Konser Musik Internasional</h2>
+
+      <div>
+        <p><strong>📧 Email:</strong> gilangherdiansyah404@gmail.com</p>
+        <p><strong>📱 No. HP:</strong> 085866244363</p>
+        <p><strong>🎟️ ID Tiket:</strong> TICKET_20251225_001</p>
+        <p><strong>📅 Tanggal Acara:</strong> 25 Desember 2025, 19:00 WIB</p>
+        <p><strong>📍 Lokasi:</strong> Stadium Utama Jakarta</p>
+      </div>
+
+      <h3>📱 QR Code untuk Check-in</h3>
+      <div class="qr-code">
+        <div
+          id="qrcode"
+          style="width: 256px; height: 256px; margin: 0 auto"
+        ></div>
+      </div>
+      <p><small>Tunjukkan QR Code ini saat check-in di acara</small></p>
+
+      <div>
+        <button onclick="downloadQRCode()">💾 Download QR Code</button>
+      </div>
+    </div>
+
+    <script>
+      // Data tiket
+      const ticketData =
+        "TICKET_ID:TICKET_20251225_001:USER:gilangherdiansyah404@gmail.com:EVENT:Konser_Musik_Internasional:DATE:2025-12-25:VENUE:Stadium_Utama_Jakarta";
+
+      // URL verifikasi
+      const verificationUrl =
+        "checkin-verification.html?data=" + encodeURIComponent(ticketData);
+
+      let qrCodeInstance = null;
+
+      // Generate QR code when page loads
+      window.addEventListener("load", function () {
+        try {
+          // Create QR code
+          QRCode.toCanvas(
+            document.getElementById("qrcode"),
+            verificationUrl,
+            {
+              width: 256,
+              height: 256,
+              margin: 2,
+              color: {
+                dark: "#000000",
+                light: "#ffffff",
+              },
+            },
+            function (error) {
+              if (error) {
+                console.error("Error generating QR code:", error);
+                document.getElementById("qrcode").innerHTML =
+                  '<p style="color: red;">Gagal membuat QR Code</p>';
+              } else {
+                console.log("QR code generated successfully!");
+              }
+            }
+          );
+        } catch (error) {
+          console.error("Error:", error);
+          document.getElementById("qrcode").innerHTML =
+            '<p style="color: red;">Error: ' + error.message + "</p>";
+        }
+      });
+
+      // Download QR code function
+      function downloadQRCode() {
+        const canvas = document.querySelector("#qrcode canvas");
+        if (canvas) {
+          const link = document.createElement("a");
+          link.download = "ticket-qr-code.png";
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+        } else {
+          alert("QR Code belum siap. Silakan refresh halaman.");
+        }
+      }
+    </script>
+  </body>
+</html>

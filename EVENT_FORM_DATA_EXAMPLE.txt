@@ -1,0 +1,53 @@
+# Event Form Data Example
+
+## Required Fields:
+- title (string): Event title
+- description (string): Event description
+- start_date (datetime): Event start date (YYYY-MM-DD HH:MM:SS format)
+- end_date (datetime): Event end date (YYYY-MM-DD HH:MM:SS format)
+- location (string): Event location
+- price (number): Event price in IDR
+
+## Image Upload:
+- Field name: images
+- Multiple files supported (but only first image will be used)
+- File types: jpeg, jpg, png, gif, webp
+- Max file size: 5MB
+
+## Example Form Data (using curl):
+
+### With Image:
+curl -X POST http://localhost:3000/api/v1/events \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "title=Music Festival 2023" \
+  -F "description=Annual music festival featuring local and international artists" \
+  -F "start_date=2023-12-15 10:00:00" \
+  -F "end_date=2023-12-17 22:00:00" \
+  -F "location=Jakarta Convention Center" \
+  -F "price=500000" \
+  -F "images=@/path/to/event-poster.jpg"
+
+## Example Form Data (using JavaScript FormData):
+
+### With Image:
+const formData = new FormData();
+formData.append('title', 'Music Festival 2023');
+formData.append('description', 'Annual music festival featuring local and international artists');
+formData.append('start_date', '2023-12-15 10:00:00');
+formData.append('end_date', '2023-12-17 22:00:00');
+formData.append('location', 'Jakarta Convention Center');
+formData.append('price', '500000');
+formData.append('images', fileInput.files[0]); // Event image
+
+fetch('/api/v1/events', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_JWT_TOKEN'
+  },
+  body: formData
+});
+
+## Notes:
+- Events support multiple image uploads but only the first image will be stored as the main event image
+- Date format should be: YYYY-MM-DD HH:MM:SS
+- All fields except image are required

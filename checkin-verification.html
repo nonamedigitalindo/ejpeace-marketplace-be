@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Verifikasi Check-in Tiket</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .ticket-info {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            text-align: left;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✅ Verifikasi Check-in Tiket</h1>
+        
+        <div class="success">
+            <h2>Tiket Valid!</h2>
+            <p>Selamat datang di acara. Nikmati konsernya!</p>
+        </div>
+        
+        <div class="ticket-info">
+            <h3>Detail Tiket:</h3>
+            <p><strong>ID Tiket:</strong> <span id="ticket-id"></span></p>
+            <p><strong>Pemilik:</strong> <span id="user-email"></span></p>
+            <p><strong>Acara:</strong> Konser Musik Internasional</p>
+            <p><strong>Tanggal:</strong> 25 Desember 2025, 19:00 WIB</p>
+            <p><strong>Lokasi:</strong> Stadium Utama Jakarta</p>
+            <p><strong>Waktu Check-in:</strong> <span id="checkin-time"></span></p>
+        </div>
+        
+        <p>QR Code ini sudah tidak berlaku untuk check-in ulang.</p>
+    </div>
+    
+    <script>
+        // Parse ticket data from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const data = urlParams.get('data');
+        
+        if (data) {
+            // Parse the ticket data
+            const parts = data.split(':');
+            const ticketInfo = {};
+            
+            for (let i = 0; i < parts.length; i += 2) {
+                if (parts[i] && parts[i + 1]) {
+                    ticketInfo[parts[i]] = parts[i + 1];
+                }
+            }
+            
+            // Display ticket information
+            document.getElementById('ticket-id').textContent = ticketInfo.TICKET_ID || 'N/A';
+            document.getElementById('user-email').textContent = ticketInfo.USER || 'N/A';
+            document.getElementById('checkin-time').textContent = new Date().toLocaleString('id-ID');
+        }
+    </script>
+</body>
+</html>
