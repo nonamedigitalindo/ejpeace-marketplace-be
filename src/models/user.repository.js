@@ -56,6 +56,29 @@ class UserRepository {
     }
   }
 
+  // Find users by IDs
+  static async findByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+
+    const placeholders = ids.map(() => '?').join(',');
+    const query = `
+      SELECT id, username, email
+      FROM users
+      WHERE id IN (${placeholders})
+    `;
+
+    try {
+      const [rows] = await db.execute(query, ids);
+      return rows;
+    } catch (error) {
+      if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
+        console.error("Database connection failed while finding users by IDs");
+        return [];
+      }
+      throw error;
+    }
+  }
+
   // Find user by ID
   static async findById(id) {
     const query = `

@@ -69,6 +69,29 @@ const getAllOrders = async () => {
     const allOrders = [...purchaseOrders, ...ticketOrders];
     allOrders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+    // START: Batch fetch user info
+    const userIds = [...new Set(allOrders.map(o => o.user_id).filter(id => id))];
+
+    if (userIds.length > 0) {
+      const UserRepository = require("../models/user.repository");
+      const users = await UserRepository.findByIds(userIds);
+      const userMap = users.reduce((acc, user) => {
+        acc[user.id] = user;
+        return acc;
+      }, {});
+
+      allOrders.forEach(order => {
+        if (order.user_id && userMap[order.user_id]) {
+          order.username = userMap[order.user_id].username;
+          order.user_email = userMap[order.user_id].email;
+        } else {
+          order.username = "Unknown";
+          order.user_email = "No email";
+        }
+      });
+    }
+    // END: Batch fetch user info
+
     return allOrders;
   } catch (error) {
     if (error.message === "Database connection failed") {
