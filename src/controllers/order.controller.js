@@ -10,10 +10,12 @@ const {
 /**
  * Get all orders (admin only)
  * Returns all purchases and tickets combined
- */
-const getAllOrders = async (req, res) => {
+ * Query params:
+ *   - type: 'xlsx' to export as Excel file
+ *   - start_date: Filter orders from this date (YYYY-MM-DD)
+ *   - end_date: Filter orders until this date (YYYY-MM-DD)
+ */const getAllOrders = async (req, res) => {
   try {
-    // Check if user is admin
     if (req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
@@ -21,9 +23,40 @@ const getAllOrders = async (req, res) => {
       });
     }
 
-    const orders = await orderService.getAllOrders();
+    const { type, start_date, end_date } = req.query;
+    const orders = await orderService.getAllOrdersFiltered(start_date, end_date);
+
+    if (type === "xlsx") {
+      // IMPORTANT: Add await if using ExcelJS
+      const xlsxBuffer = await orderService.generateOrdersXLSX(orders);
+
+      let filename = "orders";
+      if (start_date && end_date) {
+        filename += `_${start_date}_to_${end_date}`;
+      } else if (start_date) {
+        filename += `_from_${start_date}`;
+      } else if (end_date) {
+        filename += `_until_${end_date}`;
+      }
+      filename += ".xlsx";
+      // 🔍 ADD THIS DEBUG LINE
+      console.log("📊 Number of orders:", orders.length);
+      console.log("📊 First order sample:", orders[0]);
+
+      console.log("📦 Buffer size:", xlsxBuffer.length, "bytes");
+      console.log("📦 Buffer type:", typeof xlsxBuffer);
+      console.log("📦 Is Buffer:", Buffer.isBuffer(xlsxBuffer));
+      console.log("📦 First 20 bytes:", xlsxBuffer.slice(0, 20));
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", xlsxBuffer.length);
+
+      return res.send(xlsxBuffer);
+    }
+
     return successResponse(res, "Orders retrieved successfully", orders);
   } catch (error) {
+    console.error("Export error:", error); // Add logging
     if (error.message.includes("Service unavailable")) {
       return serviceUnavailableResponse(res, "Failed to retrieve orders");
     }

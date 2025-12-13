@@ -325,6 +325,205 @@ const claimVoucher = async (voucherId, userId) => {
   }
 };
 
+// ============ VOUCHER SCOPING FUNCTIONS ============
+
+/**
+ * Create voucher with product/event scoping
+ * @param {Object} voucherData - Voucher data including product_ids, event_ids, apply_to_all
+ */
+const createVoucherWithScoping = async (voucherData) => {
+  try {
+    const { product_ids, event_ids, apply_to_all, ...baseData } = voucherData;
+
+    // Create the base voucher first
+    const voucherId = await VoucherRepository.create(baseData);
+
+    // Set apply_to_all (defaults to true if not specified)
+    const shouldApplyToAll = apply_to_all !== false &&
+      (!product_ids || product_ids.length === 0) &&
+      (!event_ids || event_ids.length === 0);
+
+    await VoucherRepository.updateApplyToAll(voucherId, shouldApplyToAll);
+
+    // Add product associations if provided and not apply_to_all
+    if (!shouldApplyToAll && product_ids && product_ids.length > 0) {
+      await VoucherRepository.addProductsToVoucher(voucherId, product_ids);
+    }
+
+    // Add event associations if provided and not apply_to_all
+    if (!shouldApplyToAll && event_ids && event_ids.length > 0) {
+      await VoucherRepository.addEventsToVoucher(voucherId, event_ids);
+    }
+
+    // Return created voucher with associations
+    const createdVoucher = await getVoucherWithScoping(voucherId);
+    return createdVoucher;
+  } catch (error) {
+    if (error.message === "Database connection failed") {
+      throw new Error("Service unavailable. Please try again later.");
+    }
+    throw new Error("Failed to create voucher with scoping: " + error.message);
+  }
+};
+
+/**
+ * Get voucher by ID with product/event associations
+ */
+const getVoucherWithScoping = async (id) => {
+  try {
+    const voucher = await VoucherRepository.findById(id);
+    if (!voucher) {
+      return null;
+    }
+
+    const voucherJson = voucher.toJSON();
+
+    // Get associated products and events
+    const products = await VoucherRepository.getVoucherProducts(id);
+    const events = await VoucherRepository.getVoucherEvents(id);
+
+    return {
+      ...voucherJson,
+      products: products,
+      events: events,
+    };
+  } catch (error) {
+    throw new Error("Failed to get voucher with scoping: " + error.message);
+  }
+};
+
+/**
+ * Update voucher with product/event scoping
+ */
+const updateVoucherWithScoping = async (id, voucherData) => {
+  try {
+    const { product_ids, event_ids, apply_to_all, ...baseData } = voucherData;
+
+    // Update base voucher data
+    if (Object.keys(baseData).length > 0) {
+      await VoucherRepository.update(id, baseData);
+    }
+
+    // Determine if voucher should apply to all
+    const shouldApplyToAll = apply_to_all === true || apply_to_all === 1 || apply_to_all === "1";
+
+    // Update apply_to_all
+    if (apply_to_all !== undefined) {
+      await VoucherRepository.updateApplyToAll(id, shouldApplyToAll);
+    }
+
+    // Update product associations
+    if (product_ids !== undefined) {
+      await VoucherRepository.removeAllProductsFromVoucher(id);
+      if (!shouldApplyToAll && product_ids.length > 0) {
+        await VoucherRepository.addProductsToVoucher(id, product_ids);
+      }
+    }
+
+    // Update event associations
+    if (event_ids !== undefined) {
+      await VoucherRepository.removeAllEventsFromVoucher(id);
+      if (!shouldApplyToAll && event_ids.length > 0) {
+        await VoucherRepository.addEventsToVoucher(id, event_ids);
+      }
+    }
+
+    return await getVoucherWithScoping(id);
+  } catch (error) {
+    throw new Error("Failed to update voucher with scoping: " + error.message);
+  }
+};
+
+/**
+ * Validate if voucher applies to given items (products or events)
+ * @param {string} code - Voucher code
+ * @param {number} orderAmount - Total order amount
+ * @param {Array} productIds - Array of product IDs in cart
+ * @param {Array} eventIds - Array of event IDs in tickets
+ */
+const validateVoucherForItems = async (code, orderAmount, productIds = [], eventIds = []) => {
+  try {
+    // First do basic voucher validation
+    const voucher = await VoucherRepository.findByCode(code);
+    if (!voucher) {
+      throw new Error("Voucher not found");
+    }
+
+    // Check if voucher is valid
+    const validity = voucher.isValid();
+    if (!validity.valid) {
+      throw new Error(validity.reason);
+    }
+
+    // Check minimum order value
+    if (voucher.min_order_value && orderAmount < voucher.min_order_value) {
+      throw new Error(
+        `Minimum order value of ${voucher.min_order_value} is required`
+      );
+    }
+
+    // Check voucher type and items
+    const voucherType = voucher.voucher_type;
+    const applyToAll = voucher.apply_to_all === 1 || voucher.apply_to_all === true;
+
+    if (!applyToAll) {
+      // Voucher is scoped - check if it applies to given items
+      if (voucherType === "product") {
+        if (productIds.length === 0) {
+          throw new Error("This voucher can only be applied to products");
+        }
+
+        // Check if any product in cart is eligible
+        let hasEligibleProduct = false;
+        for (const productId of productIds) {
+          const applies = await VoucherRepository.voucherAppliesToProduct(voucher.id, productId);
+          if (applies) {
+            hasEligibleProduct = true;
+            break;
+          }
+        }
+
+        if (!hasEligibleProduct) {
+          throw new Error("This voucher does not apply to any products in your cart");
+        }
+      } else if (voucherType === "event") {
+        if (eventIds.length === 0) {
+          throw new Error("This voucher can only be applied to events");
+        }
+
+        // Check if any event is eligible
+        let hasEligibleEvent = false;
+        for (const eventId of eventIds) {
+          const applies = await VoucherRepository.voucherAppliesToEvent(voucher.id, eventId);
+          if (applies) {
+            hasEligibleEvent = true;
+            break;
+          }
+        }
+
+        if (!hasEligibleEvent) {
+          throw new Error("This voucher does not apply to any events in your order");
+        }
+      }
+    }
+
+    // Calculate discount
+    const discountAmount = voucher.calculateDiscount(orderAmount);
+
+    return {
+      valid: true,
+      voucher: voucher.toJSON(),
+      discount_amount: discountAmount,
+      final_amount: orderAmount - discountAmount,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      error: error.message,
+    };
+  }
+};
+
 module.exports = {
   createVoucher,
   getVoucherById,
@@ -336,4 +535,10 @@ module.exports = {
   applyVoucherToTicket,
   applyVoucherToPurchase,
   claimVoucher,
+  // Voucher scoping exports
+  createVoucherWithScoping,
+  getVoucherWithScoping,
+  updateVoucherWithScoping,
+  validateVoucherForItems,
 };
+

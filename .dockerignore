@@ -1,0 +1,54 @@
+# ===========================================
+# Docker Ignore - Backend
+# ===========================================
+
+# Dependencies
+node_modules
+
+# Git
+.git
+.gitignore
+
+# Environment files (use .env.docker instead)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Test files
+*.test.js
+test/
+tests/
+__tests__/
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Debug scripts
+check-*.js
+debug-*.js
+test-*.js
+simple_check.js
+
+# SQL migration files (keep for reference but not needed in container)
+*.sql
+
+# PDF/HTML files
+*.pdf
+*.html

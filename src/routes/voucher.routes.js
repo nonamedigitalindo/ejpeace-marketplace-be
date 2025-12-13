@@ -35,4 +35,19 @@ router.post(
   voucherController.applyVoucherToPurchase
 );
 
+// ============ VOUCHER SCOPING ROUTES ============
+
+// Create voucher with product/event scoping
+router.post("/scoped", authenticate, voucherController.createVoucherWithScoping);
+
+// Get voucher with scoping (includes products/events)
+router.get("/scoped/:id", voucherController.getVoucherWithScopingById);
+
+// Update voucher with scoping
+router.put("/scoped/:id", authenticate, voucherController.updateVoucherWithScoping);
+
+// Validate voucher for specific items
+router.post("/validate-for-items", authenticate, voucherController.validateVoucherForItems);
+
 module.exports = router;
+

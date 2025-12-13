@@ -3,6 +3,9 @@ const TicketRepository = require("../models/ticket.repository");
 const EventRepository = require("../models/event.repository");
 const ProductRepository = require("../models/product.repository");
 const db = require("../config/db.config");
+const XLSX = require("xlsx");
+const ExcelJS = require('exceljs');
+
 
 /**
  * Get all orders (purchases and tickets) for admin view
@@ -311,18 +314,20 @@ const getProductDataByOrderAddress = async (purchaseId, userId) => {
     }
 
     // Get product data from order_addresses table
+    // Note: order_addresses might not have product_id in the schema, 
+    // so we only fetch address fields and rely on cart items for product details
     const orderAddressQuery = `
       SELECT 
-        oa.product_id,
-        p.name as product_name,
-        p.description as product_description,
-        p.price as product_price,
-        p.category as product_category,
-        p.size as product_size,
-        p.image as product_image
-      FROM order_addresses oa
-      JOIN products p ON oa.product_id = p.id
-      WHERE oa.purchase_id = ? AND oa.product_id IS NOT NULL
+        full_name,
+        phone,
+        address_line1,
+        address_line2,
+        city,
+        state,
+        postal_code,
+        country
+      FROM order_addresses
+      WHERE purchase_id = ?
     `;
 
     const [orderAddressRows] = await db.execute(orderAddressQuery, [
@@ -348,7 +353,7 @@ const getProductDataByOrderAddress = async (purchaseId, userId) => {
     const [cartItems] = await db.execute(cartItemsQuery, [purchaseId]);
 
     return {
-      order_address_products: orderAddressRows,
+      order_address_products: orderAddressRows, // Kept property name for compatibility but now it only contains address info
       cart_items: cartItems,
       purchase_id: purchaseId,
     };
@@ -360,9 +365,126 @@ const getProductDataByOrderAddress = async (purchaseId, userId) => {
   }
 };
 
+/**
+ * Get all orders with optional date filtering
+ * @param {string} startDate - Optional start date (YYYY-MM-DD)
+ * @param {string} endDate - Optional end date (YYYY-MM-DD)
+ */
+const getAllOrdersFiltered = async (startDate = null, endDate = null) => {
+  try {
+    // Get all orders first
+    const allOrders = await getAllOrders();
+
+    // If no date filters, return all orders
+    if (!startDate && !endDate) {
+      return allOrders;
+    }
+
+    // Filter by date range
+    return allOrders.filter((order) => {
+      const orderDate = new Date(order.created_at);
+
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); // Include entire end date
+        return orderDate >= start && orderDate <= end;
+      } else if (startDate) {
+        const start = new Date(startDate);
+        return orderDate >= start;
+      } else if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        return orderDate <= end;
+      }
+      return true;
+    });
+  } catch (error) {
+    throw new Error("Failed to filter orders: " + error.message);
+  }
+};
+
+/**
+ * Generate XLSX buffer from orders data
+ * @param {Array} orders - Array of order objects
+ * @returns {Buffer} - XLSX file buffer
+ */
+
+const generateOrdersXLSX = async (orders) => {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Orders');
+
+  // Define columns with proper formatting
+  worksheet.columns = [
+    { header: 'Order ID', key: 'orderId', width: 12 },
+    { header: 'Type', key: 'type', width: 10 },
+    { header: 'User ID', key: 'userId', width: 10 },
+    { header: 'Amount (Rp)', key: 'amount', width: 15 },
+    { header: 'Status', key: 'status', width: 12 },
+    { header: 'Payment ID', key: 'paymentId', width: 25 },
+    { header: 'Created At', key: 'createdAt', width: 20 },
+    { header: 'Updated At', key: 'updatedAt', width: 20 },
+    { header: 'Completed At', key: 'completedAt', width: 20 },
+    { header: 'Customer Name', key: 'customerName', width: 25 },
+    { header: 'Phone', key: 'phone', width: 15 },
+    { header: 'Address', key: 'address', width: 40 },
+    { header: 'Items', key: 'items', width: 50 },
+    { header: 'Attendee Email', key: 'attendeeEmail', width: 25 },
+    { header: 'Ticket Type', key: 'ticketType', width: 15 },
+  ];
+
+  // Style header row
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF4472C4' }
+  };
+  worksheet.getRow(1).font.color = { argb: 'FFFFFFFF' };
+
+  // Add data
+  orders.forEach((order) => {
+    const rowData = {
+      orderId: order.id,
+      type: order.type === "product" ? "Product" : "Ticket",
+      userId: order.user_id,
+      amount: parseFloat(order.amount) || 0,
+      status: order.status,
+      paymentId: order.payment_id || "-",
+      createdAt: order.created_at ? new Date(order.created_at).toLocaleString("id-ID") : "-",
+      updatedAt: order.updated_at ? new Date(order.updated_at).toLocaleString("id-ID") : "-",
+      completedAt: order.completed_at ? new Date(order.completed_at).toLocaleString("id-ID") : "-",
+    };
+
+    if (order.type === "product" && order.details) {
+      rowData.customerName = order.details.address?.full_name || "-";
+      rowData.phone = order.details.address?.phone || "-";
+      rowData.address = order.details.address ?
+        `${order.details.address.address_line1 || ""}, ${order.details.address.city || ""}, ${order.details.address.postal_code || ""}` : "-";
+      rowData.items = order.details.items?.map(item => `${item.product_name} (x${item.quantity})`).join("; ") || "-";
+    } else if (order.type === "ticket" && order.details) {
+      rowData.customerName = order.details.attendee_name || "-";
+      rowData.phone = "-";
+      rowData.address = "-";
+      rowData.items = order.details.event_name || "-";
+      rowData.attendeeEmail = order.details.attendee_email || "-";
+      rowData.ticketType = order.details.ticket_type || "-";
+    }
+
+    worksheet.addRow(rowData);
+  });
+
+  // Generate buffer
+  const buffer = await workbook.xlsx.writeBuffer();
+  return buffer;
+};
+
 module.exports = {
   getAllOrders,
   getUserOrders,
   getOrderById,
   getProductDataByOrderAddress,
+  getAllOrdersFiltered,
+  generateOrdersXLSX,
 };
+

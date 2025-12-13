@@ -16,17 +16,16 @@ class PurchaseRepository {
     const updatedAt = new Date();
 
     const query = `
-      INSERT INTO purchases (user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO purchases (user_id, total_amount, status, payment_id, external_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
       const [result] = await db.execute(query, [
         user_id,
-        product_id || null, // Handle undefined product_id
         total_amount,
         status,
-        payment_id || null, // Handle undefined payment_id
+        payment_id || null, // Handle undefined payment_id,
         external_id || null, // Handle undefined external_id
         createdAt,
         updatedAt,
@@ -45,7 +44,7 @@ class PurchaseRepository {
   static async findById(id) {
     console.log(`[PurchaseRepository] Finding purchase by ID: ${id}`);
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE id = ?
     `;
@@ -83,7 +82,7 @@ class PurchaseRepository {
   // Find purchase by payment ID
   static async findByPaymentId(paymentId) {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE payment_id = ?
     `;
@@ -107,7 +106,7 @@ class PurchaseRepository {
   // Get all purchases for a user
   static async findByUserId(userId) {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -136,7 +135,6 @@ class PurchaseRepository {
       "external_id",
       "completed_at",
       "total_amount",
-      "product_id",
     ];
     const updates = [];
     const values = [];
@@ -183,7 +181,7 @@ class PurchaseRepository {
   // Get all purchases (for admin view)
   static async findAll() {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       ORDER BY created_at DESC
     `;

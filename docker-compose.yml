@@ -1,0 +1,106 @@
+# ===========================================
+# EJPEACE MARKETPLACE - DOCKER COMPOSE
+# ===========================================
+# This file orchestrates all services for local development
+#
+# Usage:
+#   docker-compose up --build     # Build and start all services
+#   docker-compose up -d          # Start in detached mode
+#   docker-compose down           # Stop all services
+#   docker-compose down -v        # Stop and remove volumes (clears database)
+#   docker-compose logs -f        # View logs
+#
+# NOTE: This file should be placed in the parent directory of both projects.
+#       Move this file to: d:\projects\noname\docker-compose.yml
+#       Or adjust the context paths accordingly.
+#
+# ===========================================
+
+services:
+  # ===========================================
+  # MySQL Database
+  # ===========================================
+  mysql:
+    image: mysql:8.0
+    container_name: ejpeace-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: peacetifal_db
+      MYSQL_USER: peacetifal
+      MYSQL_PASSWORD: peacetifal_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_password" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ejpeace-network
+
+  # ===========================================
+  # Backend API (Express.js)
+  # ===========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ejpeace-backend
+    restart: unless-stopped
+    env_file:
+      - ./.env.docker
+    environment:
+      - DB_HOST=mysql
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount uploads directory for persistent file storage
+      - ./uploads:/app/uploads
+      # Mount source for development (optional - comment out for production-like testing)
+      - ./src:/app/src
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - ejpeace-network
+
+  # ===========================================
+  # Frontend (Vite + React)
+  # ===========================================
+  frontend:
+    build:
+      context: ../ejpeace-marketplace-fe
+      dockerfile: Dockerfile
+    container_name: ejpeace-frontend
+    restart: unless-stopped
+    env_file:
+      - ../ejpeace-marketplace-fe/.env.docker
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount source for hot reload during development
+      - ../ejpeace-marketplace-fe/src:/app/src
+      - ../ejpeace-marketplace-fe/public:/app/public
+      - ../ejpeace-marketplace-fe/index.html:/app/index.html
+    depends_on:
+      - backend
+    networks:
+      - ejpeace-network
+
+# ===========================================
+# Networks
+# ===========================================
+networks:
+  ejpeace-network:
+    driver: bridge
+
+# ===========================================
+# Volumes
+# ===========================================
+volumes:
+  mysql_data:
+    driver: local

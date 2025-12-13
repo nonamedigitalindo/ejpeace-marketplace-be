@@ -194,7 +194,8 @@ const createVouchersTable = async () => {
       valid_from DATETIME NOT NULL,
       valid_until DATETIME NOT NULL,
       is_active BOOLEAN DEFAULT true,
-      voucher_type ENUM('product', 'event') DEFAULT 'product', -- New field for voucher classification
+      apply_to_all BOOLEAN DEFAULT TRUE,
+      voucher_type ENUM('product', 'event', 'shipping', 'general') DEFAULT 'product', -- New field for voucher classification
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_code (code),
@@ -214,6 +215,8 @@ const createVouchersTable = async () => {
     return false;
   }
 };
+
+
 
 // Add this function to create the ticket_vouchers table (many-to-many relationship)
 const createTicketVouchersTable = async () => {
@@ -300,6 +303,58 @@ const createUserVoucherClaimsTable = async () => {
     return true;
   } catch (error) {
     console.error("Error creating user voucher claims table:", error.message);
+    return false;
+  }
+};
+
+// Create voucher_products table for associating vouchers with specific products
+const createVoucherProductsTable = async () => {
+  const query = `
+    CREATE TABLE IF NOT EXISTS voucher_products (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      voucher_id INT NOT NULL,
+      product_id INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_voucher_id (voucher_id),
+      INDEX idx_product_id (product_id),
+      FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+      UNIQUE KEY unique_voucher_product (voucher_id, product_id)
+    )
+  `;
+
+  try {
+    await db.execute(query);
+    console.log("Voucher products table created or already exists");
+    return true;
+  } catch (error) {
+    console.error("Error creating voucher products table:", error.message);
+    return false;
+  }
+};
+
+// Create voucher_events table for associating vouchers with specific events
+const createVoucherEventsTable = async () => {
+  const query = `
+    CREATE TABLE IF NOT EXISTS voucher_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      voucher_id INT NOT NULL,
+      event_id INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_voucher_id (voucher_id),
+      INDEX idx_event_id (event_id),
+      FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE CASCADE,
+      FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+      UNIQUE KEY unique_voucher_event (voucher_id, event_id)
+    )
+  `;
+
+  try {
+    await db.execute(query);
+    console.log("Voucher events table created or already exists");
+    return true;
+  } catch (error) {
+    console.error("Error creating voucher events table:", error.message);
     return false;
   }
 };
@@ -847,6 +902,43 @@ const addVoucherTypeToVouchersTable = async () => {
   }
 };
 
+// Add apply_to_all column to vouchers table for scoping
+const addApplyToAllToVouchersTable = async () => {
+  try {
+    const [rows] = await db.execute(
+      `
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = ? 
+      AND TABLE_NAME = 'vouchers' 
+      AND COLUMN_NAME = 'apply_to_all'
+      `,
+      [process.env.DB_NAME || "peacetifal_db"]
+    );
+
+    if (rows.length === 0) {
+      // Column doesn't exist, add it
+      const query = `
+        ALTER TABLE vouchers 
+        ADD COLUMN apply_to_all BOOLEAN DEFAULT TRUE AFTER voucher_type
+      `;
+
+      await db.execute(query);
+      console.log("apply_to_all column added to vouchers table");
+    } else {
+      console.log("apply_to_all column already exists in vouchers table");
+    }
+
+    return true;
+  } catch (error) {
+    console.error(
+      "Error adding apply_to_all column to vouchers table:",
+      error.message
+    );
+    return false;
+  }
+};
+
 // Add ticket_id to order_addresses table to support ticket addresses
 const addTicketIdToOrderAddressesTable = async () => {
   try {
@@ -979,6 +1071,8 @@ const initializeDatabase = async () => {
     await createUserVoucherClaimsTable();
     await createOrderAddressesTable();
     await createPurchaseVouchersTable(); // Add purchase vouchers table
+    await createVoucherProductsTable(); // Add voucher-product associations
+    await createVoucherEventsTable(); // Add voucher-event associations
 
     // Add columns to existing tables if needed
     await addRoleToUsersTable();
@@ -993,7 +1087,8 @@ const initializeDatabase = async () => {
     await addImageToEventsTable();
     await removeBarcodeFromTicketsTable();
     await addPurchaseIdToCartTable();
-    await addVoucherTypeToVouchersTable(); // Add the new function
+    await addVoucherTypeToVouchersTable(); // Add voucher type
+    await addApplyToAllToVouchersTable(); // Add apply_to_all column for voucher scoping
     await addTicketIdToOrderAddressesTable(); // Add ticket support to order addresses
     await addExternalIdToPurchasesTable(); // Add external_id for Xendit tracking
     await createEventImagesTable(); // Create event images table for unlimited images per event

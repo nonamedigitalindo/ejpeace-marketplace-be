@@ -278,6 +278,100 @@ const applyVoucherToPurchase = async (req, res) => {
   }
 };
 
+// ============ VOUCHER SCOPING CONTROLLERS ============
+
+/**
+ * Create voucher with product/event scoping
+ * Accepts product_ids, event_ids, apply_to_all in request body
+ */
+const createVoucherWithScoping = async (req, res) => {
+  try {
+    const voucherData = req.body;
+
+    if (!voucherData || Object.keys(voucherData).length === 0) {
+      return validationErrorResponse(res, ["Request body is required"]);
+    }
+
+    const voucher = await voucherService.createVoucherWithScoping(voucherData);
+    return successResponse(res, "Voucher created successfully", voucher, 201);
+  } catch (error) {
+    if (error.message.includes("Service unavailable")) {
+      return serviceUnavailableResponse(res, "Failed to create voucher");
+    }
+    return errorResponse(res, "Failed to create voucher", error.message, 400);
+  }
+};
+
+/**
+ * Get voucher by ID with product/event associations
+ */
+const getVoucherWithScopingById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const voucher = await voucherService.getVoucherWithScoping(id);
+
+    if (!voucher) {
+      return notFoundResponse(res, "Voucher not found");
+    }
+
+    return successResponse(res, "Voucher retrieved successfully", voucher);
+  } catch (error) {
+    return errorResponse(res, "Failed to retrieve voucher", error.message);
+  }
+};
+
+/**
+ * Update voucher with product/event scoping
+ */
+const updateVoucherWithScoping = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const voucherData = req.body;
+
+    if (!voucherData || Object.keys(voucherData).length === 0) {
+      return validationErrorResponse(res, ["Request body is required"]);
+    }
+
+    const voucher = await voucherService.updateVoucherWithScoping(id, voucherData);
+    return successResponse(res, "Voucher updated successfully", voucher);
+  } catch (error) {
+    return errorResponse(res, "Failed to update voucher", error.message, 400);
+  }
+};
+
+/**
+ * Validate voucher for specific items
+ * Checks if voucher applies to given product_ids or event_ids
+ */
+const validateVoucherForItems = async (req, res) => {
+  try {
+    const { code, order_amount, product_ids, event_ids } = req.body;
+
+    if (!code) {
+      return validationErrorResponse(res, ["Voucher code is required"]);
+    }
+
+    if (order_amount === undefined || isNaN(order_amount) || order_amount < 0) {
+      return validationErrorResponse(res, ["Valid order amount is required"]);
+    }
+
+    const validation = await voucherService.validateVoucherForItems(
+      code,
+      order_amount,
+      product_ids || [],
+      event_ids || []
+    );
+
+    if (!validation.valid) {
+      return errorResponse(res, "Voucher validation failed", validation.error, 400);
+    }
+
+    return successResponse(res, "Voucher is valid for items", validation);
+  } catch (error) {
+    return errorResponse(res, "Failed to validate voucher", error.message, 400);
+  }
+};
+
 module.exports = {
   createVoucher,
   getVoucherById,
@@ -287,6 +381,12 @@ module.exports = {
   deleteVoucher,
   validateVoucher,
   applyVoucherToTicket,
-  applyVoucherToPurchase, // Add the new method
+  applyVoucherToPurchase,
   claimVoucher,
+  // Voucher scoping exports
+  createVoucherWithScoping,
+  getVoucherWithScopingById,
+  updateVoucherWithScoping,
+  validateVoucherForItems,
 };
+

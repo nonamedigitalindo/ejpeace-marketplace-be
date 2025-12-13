@@ -431,6 +431,148 @@ class VoucherRepository {
       throw error;
     }
   }
+
+  // ============ VOUCHER SCOPING METHODS ============
+
+  // Add products to a voucher
+  static async addProductsToVoucher(voucherId, productIds) {
+    if (!productIds || productIds.length === 0) return;
+
+    const query = `
+      INSERT IGNORE INTO voucher_products (voucher_id, product_id)
+      VALUES (?, ?)
+    `;
+
+    try {
+      for (const productId of productIds) {
+        await db.execute(query, [voucherId, productId]);
+      }
+    } catch (error) {
+      console.error("Error adding products to voucher:", error.message);
+      throw error;
+    }
+  }
+
+  // Add events to a voucher
+  static async addEventsToVoucher(voucherId, eventIds) {
+    if (!eventIds || eventIds.length === 0) return;
+
+    const query = `
+      INSERT IGNORE INTO voucher_events (voucher_id, event_id)
+      VALUES (?, ?)
+    `;
+
+    try {
+      for (const eventId of eventIds) {
+        await db.execute(query, [voucherId, eventId]);
+      }
+    } catch (error) {
+      console.error("Error adding events to voucher:", error.message);
+      throw error;
+    }
+  }
+
+  // Remove all products from a voucher
+  static async removeAllProductsFromVoucher(voucherId) {
+    const query = `DELETE FROM voucher_products WHERE voucher_id = ?`;
+    try {
+      await db.execute(query, [voucherId]);
+    } catch (error) {
+      console.error("Error removing products from voucher:", error.message);
+      throw error;
+    }
+  }
+
+  // Remove all events from a voucher
+  static async removeAllEventsFromVoucher(voucherId) {
+    const query = `DELETE FROM voucher_events WHERE voucher_id = ?`;
+    try {
+      await db.execute(query, [voucherId]);
+    } catch (error) {
+      console.error("Error removing events from voucher:", error.message);
+      throw error;
+    }
+  }
+
+  // Get products associated with a voucher
+  static async getVoucherProducts(voucherId) {
+    const query = `
+      SELECT p.id, p.name, p.price, p.category
+      FROM products p
+      JOIN voucher_products vp ON p.id = vp.product_id
+      WHERE vp.voucher_id = ? AND p.deleted_at IS NULL
+    `;
+
+    try {
+      const [rows] = await db.execute(query, [voucherId]);
+      return rows;
+    } catch (error) {
+      console.error("Error getting voucher products:", error.message);
+      return [];
+    }
+  }
+
+  // Get events associated with a voucher
+  static async getVoucherEvents(voucherId) {
+    const query = `
+      SELECT e.id, e.title, e.price, e.start_date
+      FROM events e
+      JOIN voucher_events ve ON e.id = ve.event_id
+      WHERE ve.voucher_id = ? AND e.deleted_at IS NULL
+    `;
+
+    try {
+      const [rows] = await db.execute(query, [voucherId]);
+      return rows;
+    } catch (error) {
+      console.error("Error getting voucher events:", error.message);
+      return [];
+    }
+  }
+
+  // Check if voucher applies to a specific product
+  static async voucherAppliesToProduct(voucherId, productId) {
+    const query = `
+      SELECT COUNT(*) as count FROM voucher_products
+      WHERE voucher_id = ? AND product_id = ?
+    `;
+
+    try {
+      const [rows] = await db.execute(query, [voucherId, productId]);
+      return rows[0].count > 0;
+    } catch (error) {
+      console.error("Error checking voucher product:", error.message);
+      return false;
+    }
+  }
+
+  // Check if voucher applies to a specific event
+  static async voucherAppliesToEvent(voucherId, eventId) {
+    const query = `
+      SELECT COUNT(*) as count FROM voucher_events
+      WHERE voucher_id = ? AND event_id = ?
+    `;
+
+    try {
+      const [rows] = await db.execute(query, [voucherId, eventId]);
+      return rows[0].count > 0;
+    } catch (error) {
+      console.error("Error checking voucher event:", error.message);
+      return false;
+    }
+  }
+
+  // Update apply_to_all field
+  static async updateApplyToAll(voucherId, applyToAll) {
+    const query = `UPDATE vouchers SET apply_to_all = ?, updated_at = ? WHERE id = ?`;
+    try {
+      await db.execute(query, [applyToAll ? 1 : 0, new Date(), voucherId]);
+    } catch (error) {
+      console.error("Error updating apply_to_all:", error.message);
+      throw error;
+    }
+  }
 }
 
 module.exports = VoucherRepository;
+
