@@ -157,6 +157,7 @@ const createPurchasesTable = async () => {
     CREATE TABLE IF NOT EXISTS purchases (
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
+      product_id INT NULL,
       total_amount DECIMAL(10, 2) NOT NULL,
       status VARCHAR(50) DEFAULT 'pending',
       payment_id VARCHAR(255) NULL,
@@ -164,9 +165,11 @@ const createPurchasesTable = async () => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       completed_at TIMESTAMP NULL DEFAULT NULL,
       INDEX idx_user_id (user_id),
+      INDEX idx_product_id (product_id),
       INDEX idx_payment_id (payment_id),
       INDEX idx_status (status),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
     )
   `;
 
@@ -1049,6 +1052,44 @@ const createEventImagesTable = async () => {
   }
 };
 
+// Add product_id column to existing purchases table
+const addProductIdToPurchasesTable = async () => {
+  try {
+    const [rows] = await db.execute(
+      `
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = ? 
+      AND TABLE_NAME = 'purchases' 
+      AND COLUMN_NAME = 'product_id'
+      `,
+      [process.env.DB_NAME || "peacetifal_db"]
+    );
+
+    if (rows.length === 0) {
+      // Column doesn't exist, add it
+      const query = `
+        ALTER TABLE purchases 
+        ADD COLUMN product_id INT NULL AFTER user_id,
+        ADD INDEX idx_product_id (product_id)
+      `;
+
+      await db.execute(query);
+      console.log("Product ID column added to purchases table");
+      return true;
+    } else {
+      console.log("Product ID column already exists in purchases table");
+      return true;
+    }
+  } catch (error) {
+    console.error(
+      "Error adding product ID column to purchases table:",
+      error.message
+    );
+    return false;
+  }
+};
+
 // Update the initializeDatabase function to include the new functions
 const initializeDatabase = async () => {
   console.log("Initializing database...");
@@ -1091,6 +1132,7 @@ const initializeDatabase = async () => {
     await addApplyToAllToVouchersTable(); // Add apply_to_all column for voucher scoping
     await addTicketIdToOrderAddressesTable(); // Add ticket support to order addresses
     await addExternalIdToPurchasesTable(); // Add external_id for Xendit tracking
+    await addProductIdToPurchasesTable(); // Add product_id for purchase product reference
     await createEventImagesTable(); // Create event images table for unlimited images per event
 
     console.log("Database initialization completed");
