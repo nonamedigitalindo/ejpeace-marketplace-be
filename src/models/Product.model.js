@@ -6,6 +6,7 @@ class Product {
     this.name = data.name;
     this.description = data.description;
     this.price = data.price;
+    this.discount_percentage = parseFloat(data.discount_percentage) || 0; // Discount percentage (0-100)
     this.category = data.category;
     this.size = data.size || null; // Size attribute (S, M, L, etc.)
     this.quantity = data.quantity || 0; // Stock quantity
@@ -55,8 +56,11 @@ class Product {
     return this.price;
   }
 
-  // Calculate discounted price (currently same as regular price)
+  // Calculate discounted price based on discount_percentage
   getDiscountedPrice() {
+    if (this.discount_percentage > 0 && this.discount_percentage <= 100) {
+      return this.price * (1 - this.discount_percentage / 100);
+    }
     return this.price;
   }
 
@@ -71,6 +75,12 @@ class Product {
         style: "currency",
         currency: "IDR",
       }).format(this.price),
+      discount_percentage: this.discount_percentage,
+      discounted_price: this.getDiscountedPrice(),
+      discounted_price_formatted: new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+      }).format(this.getDiscountedPrice()),
       category: this.category,
       size: this.size,
       quantity: this.quantity,

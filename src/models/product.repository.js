@@ -8,6 +8,7 @@ class ProductRepository {
       name,
       description,
       price,
+      discount_percentage,
       category,
       size,
       quantity,
@@ -17,8 +18,8 @@ class ProductRepository {
     const updatedAt = new Date();
 
     const query = `
-      INSERT INTO products (name, description, price, category, size, quantity, image, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products (name, description, price, discount_percentage, category, size, quantity, image, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
@@ -26,6 +27,7 @@ class ProductRepository {
         name,
         description,
         price,
+        discount_percentage || 0,
         category,
         size,
         quantity,
@@ -46,7 +48,7 @@ class ProductRepository {
   // Find product by ID
   static async findById(id) {
     const query = `
-      SELECT id, name, description, price, category, size, quantity, image, created_at, updated_at, deleted_at
+      SELECT id, name, description, price, discount_percentage, category, size, quantity, image, created_at, updated_at, deleted_at
       FROM products
       WHERE id = ? AND deleted_at IS NULL
     `;
@@ -80,7 +82,7 @@ class ProductRepository {
   // Get all products (excluding deleted ones)
   static async findAll() {
     const query = `
-      SELECT id, name, description, price, category, size, quantity, image, created_at, updated_at
+      SELECT id, name, description, price, discount_percentage, category, size, quantity, image, created_at, updated_at
       FROM products
       WHERE deleted_at IS NULL
       ORDER BY created_at DESC
@@ -117,6 +119,7 @@ class ProductRepository {
       "name",
       "description",
       "price",
+      "discount_percentage",
       "category",
       "size",
       "quantity",

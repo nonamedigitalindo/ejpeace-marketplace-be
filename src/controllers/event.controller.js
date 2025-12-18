@@ -153,6 +153,77 @@ const updateEvent = async (req, res) => {
     // Prepare update data (without images)
     const updateData = { ...req.body };
 
+    // Debug: log all fields received in body
+    console.log("=== DEBUG: All body fields ===");
+    console.log("Body keys:", Object.keys(updateData));
+    console.log("deletedImages field:", updateData.deletedImages);
+    console.log("deleted_images field:", updateData.deleted_images);
+
+    // Handle deletedImages - delete images by ID (support both camelCase and snake_case)
+    const deletedImagesField = updateData.deletedImages || updateData.deleted_images;
+    if (deletedImagesField) {
+      try {
+        let imagesToDelete = deletedImagesField;
+
+        // Parse if it's a JSON string
+        if (typeof imagesToDelete === 'string') {
+          imagesToDelete = JSON.parse(imagesToDelete);
+        }
+
+        console.log("Images to delete:", imagesToDelete);
+
+        if (Array.isArray(imagesToDelete) && imagesToDelete.length > 0) {
+          const fs = require("fs");
+          const path = require("path");
+
+          for (const imageIdentifier of imagesToDelete) {
+            let image = null;
+
+            // Check if it's a numeric ID or a URL string
+            if (typeof imageIdentifier === 'number' || /^\d+$/.test(imageIdentifier)) {
+              // It's a numeric ID
+              image = await EventImageRepository.findById(imageIdentifier);
+              console.log(`Looking up image by ID ${imageIdentifier}:`, image);
+            } else if (typeof imageIdentifier === 'string') {
+              // It's a URL string - find by URL pattern
+              image = await EventImageRepository.findByUrlPattern(id, imageIdentifier);
+              console.log(`Looking up image by URL pattern "${imageIdentifier}":`, image);
+            }
+
+            if (image && image.event_id == id) {
+              // Delete physical file
+              try {
+                const filename = image.image_url.split("/").pop();
+                if (filename) {
+                  const filePath = path.join(__dirname, "../../uploads", filename);
+                  if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    console.log(`[EventController] Deleted image file: ${filePath}`);
+                  }
+                }
+              } catch (fileErr) {
+                console.error("[EventController] Error deleting image file:", fileErr);
+                // Continue even if file deletion fails
+              }
+
+              // Delete from database
+              await EventImageRepository.delete(image.id);
+              console.log(`[EventController] Deleted image record: ${image.id}`);
+            } else {
+              console.log(`[EventController] Image "${imageIdentifier}" not found or doesn't belong to event ${id}`);
+            }
+          }
+        }
+      } catch (parseError) {
+        console.error("[EventController] Error parsing deletedImages:", parseError);
+        // Continue with update even if deletion fails
+      }
+
+      // Remove deletedImages from updateData so it's not passed to the event update
+      delete updateData.deletedImages;
+      delete updateData.deleted_images;
+    }
+
     // Handle files from different possible field names
     let imageFiles = [];
     if (req.files && Array.isArray(req.files)) {

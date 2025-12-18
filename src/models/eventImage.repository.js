@@ -81,6 +81,28 @@ class EventImageRepository {
         }
     }
 
+    // Find image by URL pattern (for deletion by URL instead of ID)
+    static async findByUrlPattern(eventId, urlPattern) {
+        const query = `
+      SELECT id, event_id, image_url, position, created_at
+      FROM event_images
+      WHERE event_id = ? AND image_url LIKE ?
+    `;
+
+        try {
+            // Extract filename from the URL pattern and use it for LIKE search
+            const filename = urlPattern.split("/").pop();
+            const [rows] = await db.execute(query, [eventId, `%${filename}`]);
+            if (rows.length === 0) return null;
+            return new EventImage(rows[0]);
+        } catch (error) {
+            if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
+                return null;
+            }
+            throw error;
+        }
+    }
+
     // Find image by ID
     static async findById(id) {
         const query = `
