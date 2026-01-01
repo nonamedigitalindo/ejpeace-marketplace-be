@@ -714,24 +714,31 @@ const handleInvoiceCallback = async (callbackData) => {
         external_id
       );
 
-      // Format 1: purchase_{purchaseId}_{timestamp}
+      // Format 1: purchase_{purchaseId}_{timestamp} (digits only)
       const purchaseIdMatch1 = external_id.match(/^purchase_(\d+)_\d+$/);
 
       // Format 2: purchase_{purchaseId} (simpler format)
       const purchaseIdMatch2 = external_id.match(/^purchase_(\d+)$/);
 
-      // Format 3: invoice_{invoiceId} (Xendit's default format)
+      // Format 3: purchase_{purchaseId}_{anything} (flexible format for various suffixes)
+      // This handles formats like: purchase_653_178/24332K5G1
+      const purchaseIdMatch3 = external_id.match(/^purchase_(\d+)_/);
+
+      // Format 4: invoice_{invoiceId} (Xendit's default format)
       const invoiceIdMatch = external_id.match(/^invoice_(.+)$/);
 
-      // Format 4: Just the purchase ID (in case it's sent directly)
+      // Format 5: Just the purchase ID (in case it's sent directly)
       const directPurchaseIdMatch = external_id.match(/^(\d+)$/);
 
       if (purchaseIdMatch1) {
         purchaseId = purchaseIdMatch1[1];
-        console.log("Found purchase ID from format 1:", purchaseId);
+        console.log("Found purchase ID from format 1 (digits timestamp):", purchaseId);
       } else if (purchaseIdMatch2) {
         purchaseId = purchaseIdMatch2[1];
-        console.log("Found purchase ID from format 2:", purchaseId);
+        console.log("Found purchase ID from format 2 (simple):", purchaseId);
+      } else if (purchaseIdMatch3) {
+        purchaseId = purchaseIdMatch3[1];
+        console.log("Found purchase ID from format 3 (flexible):", purchaseId);
       } else if (invoiceIdMatch) {
         // If it's in Xendit's invoice format, check if it contains purchase information
         const invoiceId = invoiceIdMatch[1];
