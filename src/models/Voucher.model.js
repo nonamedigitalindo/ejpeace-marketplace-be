@@ -18,7 +18,8 @@ class Voucher {
     this.valid_from = data.valid_from;
     this.valid_until = data.valid_until;
     this.is_active = data.is_active !== undefined ? data.is_active : true;
-    this.voucher_type = data.voucher_type || "product"; // 'product' or 'event'
+    this.apply_to_all = data.apply_to_all !== undefined ? data.apply_to_all : true; // Default: apply to all
+    this.voucher_type = data.voucher_type || "general"; // 'product', 'event', 'shipping', or 'general'
     this.created_at = data.created_at || new Date();
     this.updated_at = data.updated_at || new Date();
   }
@@ -80,12 +81,13 @@ class Voucher {
       errors.push("Valid from date must be before valid until date");
     }
 
-    // Validate voucher_type
+    // Validate voucher_type - must match database ENUM
+    const validVoucherTypes = ["product", "event", "shipping", "general"];
     if (
       !this.voucher_type ||
-      !["product", "event"].includes(this.voucher_type)
+      !validVoucherTypes.includes(this.voucher_type)
     ) {
-      errors.push("Voucher type must be either 'product' or 'event'");
+      errors.push("Voucher type must be one of: 'product', 'event', 'shipping', 'general'");
     }
 
     return errors;
@@ -152,6 +154,7 @@ class Voucher {
       valid_from: this.valid_from,
       valid_until: this.valid_until,
       is_active: this.is_active,
+      apply_to_all: this.apply_to_all,
       voucher_type: this.voucher_type,
       created_at: this.created_at,
       updated_at: this.updated_at,

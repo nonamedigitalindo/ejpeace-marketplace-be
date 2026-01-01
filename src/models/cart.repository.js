@@ -18,9 +18,11 @@ class CartRepository {
       const [checkResult] = await db.execute(checkQuery, [user_id, product_id]);
 
       if (checkResult.length > 0) {
-        // Item already exists, update the quantity
+        // Item already exists, REPLACE the quantity (not add to it)
+        // This prevents quantity duplication when user adds same product multiple times
         const existingItemId = checkResult[0].id;
-        const newQuantity = checkResult[0].quantity + quantity;
+        // Use the new quantity directly instead of adding to existing
+        const newQuantity = quantity;
 
         const updateQuery = `
           UPDATE cart 

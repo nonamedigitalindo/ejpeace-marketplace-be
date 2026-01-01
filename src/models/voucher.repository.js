@@ -51,7 +51,7 @@ class VoucherRepository {
   // Find voucher by ID
   static async findById(id) {
     const query = `
-      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, voucher_type, created_at, updated_at
+      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, apply_to_all, voucher_type, created_at, updated_at
       FROM vouchers
       WHERE id = ?
     `;
@@ -73,7 +73,7 @@ class VoucherRepository {
   // Find voucher by code
   static async findByCode(code) {
     const query = `
-      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, voucher_type, created_at, updated_at
+      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, apply_to_all, voucher_type, created_at, updated_at
       FROM vouchers
       WHERE code = ?
     `;
@@ -97,7 +97,7 @@ class VoucherRepository {
   // Get all vouchers
   static async findAll() {
     const query = `
-      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, voucher_type, created_at, updated_at
+      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, apply_to_all, voucher_type, created_at, updated_at
       FROM vouchers
       ORDER BY created_at DESC
     `;

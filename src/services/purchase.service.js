@@ -309,44 +309,11 @@ const createPurchaseDirect = async (
     // Extract product_id for checking existing pending purchases
     const productId = purchaseData.product_id || null;
 
-    // ========== CHECK FOR EXISTING PENDING PURCHASE ==========
-    // If user already has a pending purchase for the same product,
-    // update the quantity/total instead of creating a duplicate order
-    if (productId) {
-      const existingPendingPurchase = await PurchaseRepository.findPendingByUserAndProduct(
-        userId,
-        productId
-      );
-
-      if (existingPendingPurchase) {
-        console.log(
-          `[CREATE_PURCHASE_DIRECT] Found existing pending purchase: ${existingPendingPurchase.id}`
-        );
-        console.log(
-          `[CREATE_PURCHASE_DIRECT] Current total: ${existingPendingPurchase.total_amount}, Adding: ${totalAmount}`
-        );
-
-        // Calculate new total amount (existing + new)
-        const newTotalAmount =
-          parseFloat(existingPendingPurchase.total_amount) + totalAmount;
-
-        // Update the existing purchase with new total
-        await PurchaseRepository.update(existingPendingPurchase.id, {
-          total_amount: newTotalAmount,
-        });
-
-        console.log(
-          `[CREATE_PURCHASE_DIRECT] Updated purchase ${existingPendingPurchase.id} with new total: ${newTotalAmount}`
-        );
-
-        // Return updated purchase data
-        const updatedPurchase = await PurchaseRepository.findById(
-          existingPendingPurchase.id
-        );
-        return updatedPurchase.toJSON();
-      }
-    }
-    // ========== END CHECK FOR EXISTING PENDING PURCHASE ==========
+    // ========== REMOVED: CHECK FOR EXISTING PENDING PURCHASE ==========
+    // Previously, this code would merge new purchases with existing pending ones,
+    // causing quantity/amount duplication. Now we always create a fresh purchase.
+    // Old pending purchases will expire naturally or can be manually cancelled.
+    // ========== END REMOVED SECTION ==========
 
     // Apply voucher discount if provided
     let finalAmount = totalAmount;

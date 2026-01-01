@@ -874,10 +874,10 @@ const addVoucherTypeToVouchersTable = async () => {
     );
 
     if (rows.length === 0) {
-      // Column doesn't exist, add it
+      // Column doesn't exist, add it with full ENUM
       const addColumnQuery = `
         ALTER TABLE vouchers 
-        ADD COLUMN voucher_type ENUM('product', 'event') DEFAULT 'product'
+        ADD COLUMN voucher_type ENUM('product', 'event', 'shipping', 'general') DEFAULT 'general'
       `;
 
       await db.execute(addColumnQuery);
@@ -892,7 +892,18 @@ const addVoucherTypeToVouchersTable = async () => {
       await db.execute(addIndexQuery);
       console.log("Index added for voucher_type column");
     } else {
-      console.log("voucher_type column already exists in vouchers table");
+      // Column exists - update ENUM to include all values if needed
+      console.log("voucher_type column already exists, updating ENUM values...");
+      try {
+        const modifyQuery = `
+          ALTER TABLE vouchers 
+          MODIFY COLUMN voucher_type ENUM('product', 'event', 'shipping', 'general') DEFAULT 'general'
+        `;
+        await db.execute(modifyQuery);
+        console.log("voucher_type ENUM updated successfully");
+      } catch (modifyError) {
+        console.log("ENUM update skipped (may already be correct):", modifyError.message);
+      }
     }
 
     return true;
