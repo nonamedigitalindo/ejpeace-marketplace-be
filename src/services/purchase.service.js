@@ -255,26 +255,6 @@ const createPurchaseDirect = async (
   voucherCode = null
 ) => {
   try {
-    console.log(
-      "[CREATE_PURCHASE_DIRECT] Starting purchase creation for user:",
-      userId
-    );
-    console.log(
-      "[CREATE_PURCHASE_DIRECT] Purchase data received:",
-      JSON.stringify(purchaseData, null, 2)
-    );
-    // Log incoming data for debugging
-    console.log(
-      "Incoming purchaseData:",
-      JSON.stringify(purchaseData, null, 2)
-    );
-    console.log(
-      "Incoming shippingAddress:",
-      JSON.stringify(shippingAddress, null, 2)
-    );
-    console.log("Creating direct purchase for user:", userId);
-    console.log("Purchase data:", JSON.stringify(purchaseData, null, 2));
-    console.log("Shipping address:", JSON.stringify(shippingAddress, null, 2));
 
     // Validate userId
     if (!userId) {
@@ -336,6 +316,7 @@ const createPurchaseDirect = async (
           voucherCode,
           totalAmount
         );
+        console.log("Voucher validation result:", validation);
         if (validation.valid) {
           appliedVoucher = validation.voucher;
           discountAmount = validation.discount_amount;
@@ -350,16 +331,6 @@ const createPurchaseDirect = async (
       }
     }
 
-    console.log("Calculated total amount:", totalAmount);
-
-    // Create purchase record
-    console.log(
-      "[CREATE_PURCHASE_DIRECT] Extracting product_id from purchaseData:",
-      JSON.stringify(purchaseData, null, 2)
-    );
-    // productId already declared above
-    console.log("[CREATE_PURCHASE_DIRECT] Extracted productId:", productId);
-
     const purchaseRecordData = {
       user_id: userId,
       product_id: productId,
@@ -368,12 +339,9 @@ const createPurchaseDirect = async (
     };
 
     const purchaseId = await PurchaseRepository.create(purchaseRecordData);
-
-    console.log("Created purchase with ID:", purchaseId);
-
+    console.log('appliedVoucher', appliedVoucher)
     // If voucher was applied, associate it with the purchase
     if (appliedVoucher) {
-      console.log(`[createPurchaseDirect] 🎟️ Associating voucher ID ${appliedVoucher.id} with purchase ${purchaseId}`);
       try {
         const VoucherRepository = require("../models/voucher.repository");
         const linkId = await VoucherRepository.associateWithPurchase(
@@ -383,7 +351,7 @@ const createPurchaseDirect = async (
         );
         console.log(`[createPurchaseDirect] ✅ Voucher linked successfully (link ID: ${linkId})`);
         // Increment usage removed to prevent double counting (moved to handleInvoiceCallback)
-        // await VoucherRepository.incrementUsage(appliedVoucher.id);
+        //  await VoucherRepository.incrementUsage(appliedVoucher.id);
       } catch (error) {
         console.error(`[createPurchaseDirect] ❌ VOUCHER LINK FAILED: ${error.message}`);
         throw new Error(`Failed to associate voucher with purchase: ${error.message}`);
@@ -412,6 +380,9 @@ const createPurchaseDirect = async (
 
     // Return purchase data
     const purchase = await PurchaseRepository.findById(purchaseId);
+    // if (appliedVoucher){
+
+    // }
     return purchase.toJSON();
   } catch (error) {
     console.error("Failed to create direct purchase:", error);
