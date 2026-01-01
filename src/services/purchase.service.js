@@ -600,7 +600,7 @@ const handlePaymentCallback = async (callbackData) => {
           "SELECT voucher_id FROM purchase_vouchers WHERE purchase_id = ?",
           [purchase.id]
         );
-
+        console.log('voucherRows', voucherRows)
         if (voucherRows.length > 0) {
           const voucherId = voucherRows[0].voucher_id;
           await VoucherRepository.incrementUsage(voucherId);
