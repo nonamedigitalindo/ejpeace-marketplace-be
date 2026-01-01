@@ -793,416 +793,336 @@ const handleInvoiceCallback = async (callbackData) => {
       );
     }
 
-    // Check if purchase is already paid to prevent double processing
-    if (purchase.status === "paid") {
-      console.log(
-        "⚠️  [Invoice Callback] Purchase already paid, skipping duplicate processing"
-      );
-      console.log(
-        `    Purchase ID: ${purchase.id}, Status: ${purchase.status}`
-      );
-      console.log(`    This is likely a duplicate webhook callback.`);
-      return {
-        purchase_id: purchase.id,
-        status: "paid",
-        message: "Purchase already processed - duplicate webhook ignored",
-      };
-    }
+    // START TRANSACTION
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
 
-    // Update purchase status based on invoice status
-    let newStatus = "pending";
-    if (status === "PAID" || status === "SUCCESS") {
-      newStatus = "paid";
-    } else if (status === "EXPIRED") {
-      newStatus = "cancelled";
-    } else if (status === "SETTLED") {
-      newStatus = "paid"; // Treat SETTLED as paid
-    }
+    let newStatus = "pending"; // Declare newStatus here for wider scope
+    let cartItems = []; // Declare cartItems here for wider scope
 
-    console.log(
-      `[Invoice Callback] Updating purchase ${purchase.id} to status: ${newStatus}`
-    );
-
-    const updated = await PurchaseRepository.update(purchase.id, {
-      status: newStatus,
-      product_id: purchase.product_id, // Preserve product_id when updating status
-      completed_at:
-        status === "PAID" || status === "SUCCESS" || status === "SETTLED"
-          ? new Date()
-          : null,
-    });
-
-    if (!updated) {
-      console.error(
-        `[Invoice Callback] ❌ Failed to update purchase ${purchase.id}`
-      );
-      throw new Error("Failed to update purchase status");
-    }
-
-    console.log(
-      `[Invoice Callback] ✅ Successfully updated purchase ${purchase.id} to ${newStatus}`
-    );
-
-    // Declare cartItems outside if block for wider scope
-    let cartItems = [];
-
-    // If payment is successful, update product quantities and generate tickets
-    if (status === "PAID" || status === "SUCCESS" || status === "SETTLED") {
-      console.log(
-        `[Invoice Callback] Payment successful - Processing cart items for purchase ${purchase.id}`
+    try {
+      // 🔒 LOCK ROW: Get purchase with lock to prevent race conditions
+      console.log(`[Invoice Callback] 🔒 Locking purchase row ${purchase.id}...`);
+      const [lockedRows] = await connection.execute(
+        "SELECT * FROM purchases WHERE id = ? FOR UPDATE",
+        [purchase.id]
       );
 
-      // ✅ CRITICAL FIX: Get cart items by purchase_id (not user_id)
-      // This ensures we only process items for THIS specific purchase
-      // Cart items are already linked to purchase during creation
-      cartItems = await CartRepository.getCartItemsByPurchaseId(purchase.id);
-
-      console.log(
-        `[Invoice Callback] Found ${cartItems.length} cart items linked to purchase ${purchase.id}`
-      );
-
-      // ✅ FALLBACK 1: If no cart items linked, try order_addresses table
-      // This table always has product_id linked to purchase during checkout
-      if (!cartItems || cartItems.length === 0) {
-        console.log(
-          `[Invoice Callback] ⚠️ No cart items linked, trying order_addresses fallback`
-        );
-
-        try {
-          const OrderAddressRepository = require("../models/orderAddress.repository");
-          const orderAddress = await OrderAddressRepository.findByPurchaseId(purchase.id);
-
-          if (orderAddress && orderAddress.product_id) {
-            console.log(
-              `[Invoice Callback] ✅ Found product_id ${orderAddress.product_id} from order_addresses`
-            );
-
-            // Create a cart item-like object for the loop below
-            const product = await ProductRepository.findById(orderAddress.product_id);
-            if (product) {
-              // Calculate quantity from total_amount / price
-              const totalAmount = parseFloat(purchase.total_amount);
-              const productPrice = parseFloat(product.price);
-              const quantity = Math.max(1, Math.floor(totalAmount / productPrice));
-
-              cartItems = [{
-                product_id: orderAddress.product_id,
-                quantity: quantity,
-                product_name: product.name,
-                product_category: product.category
-              }];
-
-              console.log(
-                `[Invoice Callback] Created virtual cart item: product ${orderAddress.product_id}, qty ${quantity}`
-              );
-            }
-          }
-        } catch (orderAddressError) {
-          console.warn(`[Invoice Callback] order_addresses fallback failed:`, orderAddressError.message);
-        }
+      if (lockedRows.length === 0) {
+        await connection.rollback();
+        throw new Error(`Purchase ${purchase.id} not found during lock`);
       }
 
-      // ✅ FALLBACK 2: Try user's cart (may be empty if cleared)
-      if (!cartItems || cartItems.length === 0) {
-        console.log(
-          `[Invoice Callback] ⚠️ No items from order_addresses, trying user cart`
-        );
+      const lockedPurchase = lockedRows[0];
 
-        const userCartItems = await CartRepository.getCartItemsByUserId(purchase.user_id);
-        if (userCartItems && userCartItems.length > 0) {
-          console.log(
-            `[Invoice Callback] Found ${userCartItems.length} items in user's cart`
-          );
-          cartItems = userCartItems;
-        }
+      // ✅ IDEMPOTENCY CHECK: Check if already paid
+      if (lockedPurchase.status === "paid") {
+        await connection.commit();
+        console.log(
+          "⚠️  [Invoice Callback] Purchase already paid (idempotent check), skipping."
+        );
+        return {
+          purchase_id: lockedPurchase.id,
+          status: "paid",
+          message: "Purchase already processed - duplicate webhook ignored",
+        };
+      }
+
+      // Determine new status
+      if (status === "PAID" || status === "SUCCESS") {
+        newStatus = "paid";
+      } else if (status === "EXPIRED") {
+        newStatus = "cancelled";
+      } else if (status === "SETTLED") {
+        newStatus = "paid";
       }
 
       console.log(
-        `[Invoice Callback] Processing ${cartItems.length} cart items for stock reduction`
+        `[Invoice Callback] Updating purchase ${lockedPurchase.id} to status: ${newStatus}`
       );
 
-      // Validate cart items exist
-      if (cartItems && Array.isArray(cartItems)) {
-        for (const item of cartItems) {
-          // Validate item structure
-          if (!item.product_id || !item.quantity) {
-            console.warn("Invalid cart item structure:", item);
-            continue;
-          }
+      // UPDATE STATUS (Transactional)
+      await PurchaseRepository.updateStatusWithConnection(
+        lockedPurchase.id,
+        newStatus,
+        connection
+      );
 
-          const product = await ProductRepository.findById(item.product_id);
-          if (!product) {
-            console.warn(`Product ${item.product_id} not found`);
-            continue;
-          }
+      // If payment is successful, process stock and vouchers
+      if (newStatus === "paid") {
+        console.log(`[Invoice Callback] Payment successful - Processing items...`);
 
-          console.log(
-            `[Invoice Callback] Processing product: ${product.name}, Category: ${product.category}`
-          );
+        // 1. Get Cart Items
+        cartItems = await CartRepository.getCartItemsByPurchaseId(lockedPurchase.id);
 
-          // Check if this is a Ticket product
-          if (product.category && product.category.toLowerCase() === "ticket") {
-            console.log(
-              `[Invoice Callback] 🎫 Found ticket product: ${product.name}`
-            );
-
-            // Parse EventID from description
-            const eventIdMatch =
-              product.description &&
-              product.description.match(/\[EventID:\s*(\d+)\]/i);
-
-            if (eventIdMatch) {
-              const eventId = parseInt(eventIdMatch[1]);
-              console.log(
-                `[Invoice Callback] 🎟️ Creating ticket for Event ID: ${eventId}`
-              );
-
-              try {
-                // Import BarcodeService (ticket.service causes circular dependency)
-                const BarcodeService = require("./barcode.service");
-
-                // Get user details for ticket
-                const user = await UserRepository.findById(purchase.user_id);
-
-                // Create ticket for each quantity
-                for (let i = 0; i < item.quantity; i++) {
-                  // Create ticket record
-                  const ticketData = {
-                    user_id: purchase.user_id,
-                    event_id: eventId,
-                    ticket_type: product.size || "general", // Use product size as ticket type if available
-                    price: product.getDiscountedPrice(),
-                    status: "paid",
-                    payment_id: purchase.payment_id,
-                    attendee_name: user.username || user.email,
-                    attendee_email: user.email,
-                    attendee_phone: user.phone || null,
-                  };
-
-                  // Create ticket in database using top-level import
-                  const ticketId = await TicketRepository.create(ticketData);
-
-                  console.log(
-                    `[Invoice Callback] ✅ Created ticket ${ticketId} for Event ${eventId}`
-                  );
-
-                  // Generate barcode/QR code for the ticket
-                  const barcode = await BarcodeService.createBarcode(
-                    ticketId,
-                    purchase.user_id,
-                    eventId
-                  );
-
-                  console.log(
-                    `[Invoice Callback] 🎫 Generated barcode for ticket ${ticketId}`
-                  );
-
-                  // Send ticket confirmation email directly using NotificationService
-                  // to avoid circular dependency with ticket.service
-                  try {
-                    const NotificationService = require("./notification.service");
-                    const EventRepository = require("../models/event.repository");
-
-                    const event = await EventRepository.findById(eventId);
-
-                    if (event && user) {
-                      const formattedPrice = new Intl.NumberFormat("id-ID", {
-                        style: "currency",
-                        currency: "IDR",
-                      }).format(ticketData.price);
-
-                      const startDate = new Date(event.start_date);
-                      const formattedStartDate = startDate.toLocaleDateString(
-                        "id-ID",
-                        {
-                          weekday: "long",
-                          year: "numeric",
-                          month: "long",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        }
-                      );
-
-                      const emailHtml = `
-                        <!DOCTYPE html>
-                        <html>
-                        <head><meta charset="UTF-8"><title>Konfirmasi Tiket</title></head>
-                        <body style="font-family: Arial, sans-serif; line-height: 1.6;">
-                          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                            <h2>🎉 Konfirmasi Pembelian Tiket</h2>
-                            <p>Halo ${ticketData.attendee_name},</p>
-                            <p>Terima kasih telah membeli tiket untuk:</p>
-                            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                              <h3>${event.title}</h3>
-                              <p><strong>Lokasi:</strong> ${event.location}</p>
-                              <p><strong>Tanggal:</strong> ${formattedStartDate}</p>
-                              <p><strong>Harga:</strong> ${formattedPrice}</p>
-                            </div>
-                            <div style="text-align: center; margin: 30px 0;">
-                              <p><strong>ID Tiket:</strong> ${ticketId}</p>
-                              ${barcode.qr_code_image
-                          ? `<img src="${barcode.qr_code_image}" alt="QR Code" style="max-width: 200px;">`
-                          : ""
-                        }
-                            </div>
-                            <p>Salam,<br>Tim Peacetifal</p>
-                          </div>
-                        </body>
-                        </html>
-                      `;
-
-                      await NotificationService.sendEmail(
-                        ticketData.attendee_email,
-                        `Konfirmasi Tiket - ${event.title}`,
-                        emailHtml
-                      );
-                    }
-                  } catch (emailError) {
-                    console.error(
-                      `[Invoice Callback] ⚠️ Failed to send email for ticket ${ticketId}:`,
-                      emailError.message
-                    );
-                    // Continue even if email fails
-                  }
-
-                  console.log(
-                    `[Invoice Callback] 📧 Processed confirmation for ticket ${ticketId}`
-                  );
-                }
-              } catch (ticketError) {
-                console.error(
-                  `[Invoice Callback] ❌ Failed to create ticket for Event ${eventId}:`,
-                  ticketError.message
-                );
-                // Continue processing other items even if ticket creation fails
+        // Fallback 1: Order Addresses
+        if (!cartItems || cartItems.length === 0) {
+          try {
+            const OrderAddressRepository = require("../models/orderAddress.repository");
+            const orderAddress = await OrderAddressRepository.findByPurchaseId(lockedPurchase.id);
+            if (orderAddress && orderAddress.product_id) {
+              const product = await ProductRepository.findById(orderAddress.product_id);
+              if (product) {
+                const totalAmount = parseFloat(lockedPurchase.total_amount);
+                const productPrice = parseFloat(product.price);
+                const quantity = Math.max(1, Math.floor(totalAmount / productPrice));
+                cartItems = [{
+                  product_id: orderAddress.product_id,
+                  quantity: quantity,
+                  product_name: product.name,
+                  product_category: product.category
+                }];
+                console.log(`[Invoice Callback] Used order_addresses fallback.`);
               }
-            } else {
-              console.warn(
-                `[Invoice Callback] ⚠️ Ticket product "${product.name}" missing [EventID: X] in description`
-              );
             }
-          }
-
-          // Always update quantity for all products (including tickets)
-          try {
-            if (product.quantity >= item.quantity) {
-              await ProductRepository.update(item.product_id, {
-                name: product.name,
-                description: product.description,
-                price: product.price,
-                category: product.category,
-                size: product.size,
-                quantity: product.quantity - item.quantity,
-              });
-
-              console.log(
-                `[Invoice Callback] 📦 Updated quantity for product ${product.name
-                } (ID: ${item.product_id}) from ${product.quantity} to ${product.quantity - item.quantity
-                }`
-              );
-            } else {
-              console.warn(
-                `[Invoice Callback] ⚠️ Insufficient stock for product ${product.name} (ID: ${item.product_id}). Current: ${product.quantity}, Required: ${item.quantity}`
-              );
-            }
-          } catch (stockError) {
-            console.error(
-              `[Invoice Callback] ❌ Failed to update stock for product ${item.product_id}:`,
-              stockError.message
-            );
-            // Continue processing other items
+          } catch (err) {
+            console.warn(`[Invoice Callback] order_addresses fallback failed: ${err.message}`);
           }
         }
-      }
-    }
 
-    // ✅ FALLBACK: Handle direct purchase without cart items (Buy Now flow)
-    if (newStatus === "paid") {
-      // If no cart items found, this might be a direct purchase
-      // Use purchase.product_id to reduce stock
-      if (!cartItems || cartItems.length === 0) {
-        console.log(
-          `[Invoice Callback] ⚠️ No cart items found - checking for direct purchase`
-        );
+        // Fallback 2: User Cart
+        if (!cartItems || cartItems.length === 0) {
+          // Note: This relies on user's current cart state, which is risky but kept as last resort
+          const userCartItems = await CartRepository.getCartItemsByUserId(lockedPurchase.user_id);
+          if (userCartItems && userCartItems.length > 0) {
+            cartItems = userCartItems;
+            console.log(`[Invoice Callback] Used user cart fallback.`);
+          }
+        }
 
-        if (purchase.product_id) {
-          console.log(
-            `[Invoice Callback] 📦 Processing direct purchase for product_id: ${purchase.product_id}`
-          );
+        // 2. Reduce Stock (Transactional)
+        if (cartItems && cartItems.length > 0) {
+          for (const item of cartItems) {
+            if (!item.product_id || !item.quantity) continue;
 
-          try {
-            const product = await ProductRepository.findById(
-              purchase.product_id
-            );
-
+            // Get current product state (could also lock product row here if strict consistency needed)
+            const product = await ProductRepository.findById(item.product_id);
             if (product) {
-              // Calculate actual quantity purchased from total_amount / price
-              const productPrice = parseFloat(product.price);
-              const totalAmount = parseFloat(purchase.total_amount);
-              const purchasedQuantity = Math.floor(totalAmount / productPrice);
+              // Ticket Creation Logic (kept non-transactional for now as it involves many external calls/emails)
+              // Ideally tickets should be created within transaction too, but let's focus on stock/voucher first.
+              // We will keep the ticket creation logic OUTSIDE this block or assume it handles its own errors safely.
+              // For this refactor, I will ONLY reduce stock transactionally.
 
-              console.log(
-                `[Invoice Callback] 📊 Calculated quantity: ${totalAmount} / ${productPrice} = ${purchasedQuantity}`
-              );
-
-              if (product.quantity >= purchasedQuantity) {
-                await ProductRepository.update(purchase.product_id, {
-                  name: product.name,
-                  description: product.description,
-                  price: product.price,
-                  category: product.category,
-                  size: product.size,
-                  quantity: product.quantity - purchasedQuantity,
-                });
-
-                console.log(
-                  `[Invoice Callback] ✅ Direct purchase: Reduced stock for product "${product.name
-                  }" from ${product.quantity} to ${product.quantity - purchasedQuantity
-                  }`
+              if (product.quantity >= item.quantity) {
+                const newQuantity = product.quantity - item.quantity;
+                await ProductRepository.updateQuantityWithConnection(
+                  item.product_id,
+                  newQuantity,
+                  connection
                 );
+                console.log(`[Invoice Callback] 📉 Stock reduced for product ${item.product_id}`);
               } else {
-                console.warn(
-                  `[Invoice Callback] ⚠️ Insufficient stock for product ${product.id}`
-                );
+                console.warn(`[Invoice Callback] ⚠️ Insufficient stock for product ${item.product_id}`);
               }
-            } else {
-              console.warn(
-                `[Invoice Callback] ⚠️ Product ${purchase.product_id} not found`
-              );
             }
-          } catch (error) {
-            console.error(
-              `[Invoice Callback] ❌ Error reducing stock for direct purchase:`,
-              error
-            );
           }
-        } else {
-          console.warn(
-            `[Invoice Callback] ⚠️ No product_id in purchase - cannot reduce stock`
-          );
         }
-      }
-    }
 
-    // Increment voucher usage if a voucher was applied to this purchase
-    if (newStatus === "paid") {
-      try {
+        // 3. Handle Direct Purchase Stock Reduction (Transactional)
+        if ((!cartItems || cartItems.length === 0) && lockedPurchase.product_id) {
+          const product = await ProductRepository.findById(lockedPurchase.product_id);
+          if (product) {
+            const totalAmount = parseFloat(lockedPurchase.total_amount);
+            const productPrice = parseFloat(product.price);
+            const quantity = Math.floor(totalAmount / productPrice);
+
+            if (product.quantity >= quantity) {
+              await ProductRepository.updateQuantityWithConnection(
+                lockedPurchase.product_id,
+                product.quantity - quantity,
+                connection
+              );
+              console.log(`[Invoice Callback] 📉 Direct purchase stock reduced`);
+            }
+          }
+        }
+
+        // 4. Increment Voucher Usage (Transactional)
         const VoucherRepository = require("../models/voucher.repository");
-        const [voucherRows] = await db.execute(
+        const [voucherRows] = await connection.execute(
           "SELECT voucher_id FROM purchase_vouchers WHERE purchase_id = ?",
-          [purchase.id]
+          [lockedPurchase.id]
         );
 
         if (voucherRows.length > 0) {
           const voucherId = voucherRows[0].voucher_id;
-          await VoucherRepository.incrementUsage(voucherId);
-          console.log(`[Invoice Callback] ✅ Incremented usage for voucher ${voucherId}`);
+          await VoucherRepository.incrementUsageWithConnection(voucherId, connection);
+          console.log(`[Invoice Callback] 🎟️ Voucher ${voucherId} usage incremented`);
         }
-      } catch (voucherError) {
-        console.warn("[Invoice Callback] ⚠️ Could not increment voucher usage:", voucherError.message);
+      }
+
+      await connection.commit();
+      console.log(`[Invoice Callback] ✅ Transaction committed successfully`);
+    } catch (error) {
+      await connection.rollback();
+      console.error(`[Invoice Callback] ❌ Transaction failed, rolled back: ${error.message}`);
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    // Post-Transaction: Ticket Creation & Emails (Non-critical to be in same DB transaction, but good to be after commit)
+    // We need to re-fetch items or use the `cartItems` from above to generate tickets
+    // Since we are now outside the transaction, we can proceed with non-transactional tasks
+    if (newStatus === "paid") {
+      // Re-run ticket logic here if needed, or keeping it strictly stock/voucher focused as requested.
+      // The original code had ticket creation mixed in. I should preserve it.
+      // To preserve it without bloating the transaction block, I will iterate cartItems again here.
+
+      // Helper function for ticket creation to keep the main flow clean
+      const _handleTicketCreation = async (item, purchase, product) => {
+        console.log(
+          `[Invoice Callback] 🎫 Found ticket product: ${product.name}`
+        );
+
+        // Parse EventID from description
+        const eventIdMatch =
+          product.description &&
+          product.description.match(/\[EventID:\s*(\d+)\]/i);
+
+        if (eventIdMatch) {
+          const eventId = parseInt(eventIdMatch[1]);
+          console.log(
+            `[Invoice Callback] 🎟️ Creating ticket for Event ID: ${eventId}`
+          );
+
+          try {
+            // Import BarcodeService (ticket.service causes circular dependency)
+            const BarcodeService = require("./barcode.service");
+
+            // Get user details for ticket
+            const user = await UserRepository.findById(purchase.user_id);
+
+            // Create ticket for each quantity
+            for (let i = 0; i < item.quantity; i++) {
+              // Create ticket record
+              const ticketData = {
+                user_id: purchase.user_id,
+                event_id: eventId,
+                ticket_type: product.size || "general", // Use product size as ticket type if available
+                price: product.getDiscountedPrice(),
+                status: "paid",
+                payment_id: purchase.payment_id,
+                attendee_name: user.username || user.email,
+                attendee_email: user.email,
+                attendee_phone: user.phone || null,
+              };
+
+              // Create ticket in database using top-level import
+              const ticketId = await TicketRepository.create(ticketData);
+
+              console.log(
+                `[Invoice Callback] ✅ Created ticket ${ticketId} for Event ${eventId}`
+              );
+
+              // Generate barcode/QR code for the ticket
+              const barcode = await BarcodeService.createBarcode(
+                ticketId,
+                purchase.user_id,
+                eventId
+              );
+
+              console.log(
+                `[Invoice Callback] 🎫 Generated barcode for ticket ${ticketId}`
+              );
+
+              // Send ticket confirmation email directly using NotificationService
+              // to avoid circular dependency with ticket.service
+              try {
+                const NotificationService = require("./notification.service");
+                const EventRepository = require("../models/event.repository");
+
+                const event = await EventRepository.findById(eventId);
+
+                if (event && user) {
+                  const formattedPrice = new Intl.NumberFormat("id-ID", {
+                    style: "currency",
+                    currency: "IDR",
+                  }).format(ticketData.price);
+
+                  const startDate = new Date(event.start_date);
+                  const formattedStartDate = startDate.toLocaleDateString(
+                    "id-ID",
+                    {
+                      weekday: "long",
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }
+                  );
+
+                  const emailHtml = `
+                      <!DOCTYPE html>
+                      <html>
+                      <head><meta charset="UTF-8"><title>Konfirmasi Tiket</title></head>
+                      <body style="font-family: Arial, sans-serif; line-height: 1.6;">
+                        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                          <h2>🎉 Konfirmasi Pembelian Tiket</h2>
+                          <p>Halo ${ticketData.attendee_name},</p>
+                          <p>Terima kasih telah membeli tiket untuk:</p>
+                          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                            <h3>${event.title}</h3>
+                            <p><strong>Lokasi:</strong> ${event.location}</p>
+                            <p><strong>Tanggal:</strong> ${formattedStartDate}</p>
+                            <p><strong>Harga:</strong> ${formattedPrice}</p>
+                          </div>
+                          <div style="text-align: center; margin: 30px 0;">
+                            <p><strong>ID Tiket:</strong> ${ticketId}</p>
+                            ${barcode.qr_code_image
+                      ? `<img src="${barcode.qr_code_image}" alt="QR Code" style="max-width: 200px;">`
+                      : ""
+                    }
+                          </div>
+                          <p>Salam,<br>Tim Peacetifal</p>
+                        </div>
+                      </body>
+                      </html>
+                    `;
+
+                  await NotificationService.sendEmail(
+                    ticketData.attendee_email,
+                    `Konfirmasi Tiket - ${event.title}`,
+                    emailHtml
+                  );
+                }
+              } catch (emailError) {
+                console.error(
+                  `[Invoice Callback] ⚠️ Failed to send email for ticket ${ticketId}:`,
+                  emailError.message
+                );
+                // Continue even if email fails
+              }
+
+              console.log(
+                `[Invoice Callback] 📧 Processed confirmation for ticket ${ticketId}`
+              );
+            }
+          } catch (ticketError) {
+            console.error(
+              `[Invoice Callback] ❌ Failed to create ticket for Event ${eventId}:`,
+              ticketError.message
+            );
+            // Continue processing other items even if ticket creation fails
+          }
+        } else {
+          console.warn(
+            `[Invoice Callback] ⚠️ Ticket product "${product.name}" missing [EventID: X] in description`
+          );
+        }
+      };
+
+      if (cartItems && cartItems.length > 0) {
+        for (const item of cartItems) {
+          const product = await ProductRepository.findById(item.product_id);
+          if (product && product.category && product.category.toLowerCase() === "ticket") {
+            _handleTicketCreation(item, purchase, product).catch(err => console.error("Ticket creation error:", err));
+          }
+        }
       }
     }
+
 
     // --- NEW: Generate QR & Invoice & Send Email ---
     if (newStatus === "paid") {

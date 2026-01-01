@@ -1,5 +1,6 @@
 const db = require("../config/db.config");
 const Voucher = require("./Voucher.model");
+const { toJakartaDateString } = require("../utils/date.util");
 
 class VoucherRepository {
   // Create a new voucher
@@ -13,10 +14,20 @@ class VoucherRepository {
       valid_from,
       valid_until,
       is_active,
-      voucher_type, // Add the new field
+      voucher_type,
     } = voucherData;
     const createdAt = new Date();
     const updatedAt = new Date();
+
+    // Enforce Strict Timezone Handling
+    let formattedValidFrom = valid_from;
+    let formattedValidUntil = valid_until;
+    try {
+      if (valid_from) formattedValidFrom = toJakartaDateString(valid_from);
+      if (valid_until) formattedValidUntil = toJakartaDateString(valid_until);
+    } catch (e) {
+      throw new Error(`Timezone Validation Error: ${e.message}`);
+    }
 
     const query = `
       INSERT INTO vouchers (code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, voucher_type, created_at, updated_at)
@@ -31,16 +42,15 @@ class VoucherRepository {
         max_usage,
         0, // used_count starts at 0
         min_order_value,
-        valid_from,
-        valid_until,
+        formattedValidFrom,
+        formattedValidUntil,
         is_active,
-        voucher_type, // Add the new field
+        voucher_type || "general",
         createdAt,
         updatedAt,
       ]);
       return result.insertId;
     } catch (error) {
-      // If it's a connection error, return a special error
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         throw new Error("Database connection failed");
       }
@@ -51,7 +61,7 @@ class VoucherRepository {
   // Find voucher by ID
   static async findById(id) {
     const query = `
-      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, apply_to_all, voucher_type, created_at, updated_at
+      SELECT *
       FROM vouchers
       WHERE id = ?
     `;
@@ -61,7 +71,6 @@ class VoucherRepository {
       if (rows.length === 0) return null;
       return new Voucher(rows[0]);
     } catch (error) {
-      // If it's a connection error, return null
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         console.error("Database connection failed while finding voucher by ID");
         return null;
@@ -73,7 +82,7 @@ class VoucherRepository {
   // Find voucher by code
   static async findByCode(code) {
     const query = `
-      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, apply_to_all, voucher_type, created_at, updated_at
+      SELECT *
       FROM vouchers
       WHERE code = ?
     `;
@@ -83,21 +92,18 @@ class VoucherRepository {
       if (rows.length === 0) return null;
       return new Voucher(rows[0]);
     } catch (error) {
-      // If it's a connection error, return null
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-        console.error(
-          "Database connection failed while finding voucher by code"
-        );
+        console.error("Database connection failed while finding voucher by code");
         return null;
       }
       throw error;
     }
   }
 
-  // Get all vouchers
+  // Find all vouchers
   static async findAll() {
     const query = `
-      SELECT id, code, discount_type, discount_value, max_usage, used_count, min_order_value, valid_from, valid_until, is_active, apply_to_all, voucher_type, created_at, updated_at
+      SELECT *
       FROM vouchers
       ORDER BY created_at DESC
     `;
@@ -106,7 +112,6 @@ class VoucherRepository {
       const [rows] = await db.execute(query);
       return rows.map((row) => new Voucher(row));
     } catch (error) {
-      // If it's a connection error, return empty array
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         console.error("Database connection failed while fetching all vouchers");
         return [];
@@ -115,111 +120,77 @@ class VoucherRepository {
     }
   }
 
-  // Update voucher - extremely defensive approach
+  // Update voucher
   static async update(id, voucherData) {
+    const allowedFields = [
+      "code",
+      "discount_type",
+      "discount_value",
+      "max_usage",
+      "min_order_value",
+      "valid_from",
+      "valid_until",
+      "is_active",
+      "voucher_type",
+      "apply_to_all",
+    ];
+    const updates = [];
+    const values = [];
+
+    // Enforce Strict Timezone Handling
+    if (voucherData.valid_from) {
+      try {
+        voucherData.valid_from = toJakartaDateString(voucherData.valid_from);
+      } catch (e) {
+        throw new Error(`Timezone Validation Error: ${e.message}`);
+      }
+    }
+    if (voucherData.valid_until) {
+      try {
+        voucherData.valid_until = toJakartaDateString(voucherData.valid_until);
+      } catch (e) {
+        throw new Error(`Timezone Validation Error: ${e.message}`);
+      }
+    }
+
+    for (const field of allowedFields) {
+      if (voucherData[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        values.push(voucherData[field]);
+      }
+    }
+
+    updates.push("updated_at = ?");
+    values.push(new Date());
+    values.push(id);
+
+    if (updates.length === 1) return false;
+
+    const query = `
+      UPDATE vouchers
+      SET ${updates.join(", ")}
+      WHERE id = ?
+    `;
+
     try {
-      // Extreme defensive filtering - ensure we never pass undefined values
-      const cleanData = {};
-
-      // Only process if voucherData is a valid object
-      if (
-        voucherData &&
-        typeof voucherData === "object" &&
-        !Array.isArray(voucherData)
-      ) {
-        // Process each key-value pair
-        for (const [key, value] of Object.entries(voucherData)) {
-          // Skip ID field and any undefined/null values
-          if (key !== "id" && value !== undefined) {
-            // Convert undefined to null explicitly
-            cleanData[key] = value === undefined ? null : value;
-          }
-        }
-      }
-
-      // If no valid fields to update, return early
-      const fieldCount = Object.keys(cleanData).length;
-      if (fieldCount === 0) {
-        console.log("No fields to update, returning early");
-        return true;
-      }
-
-      console.log(`Processing ${fieldCount} fields for update`);
-
-      // Build query with extreme care
-      const fields = [];
-      const values = [];
-
-      // Process each clean field
-      for (const [key, value] of Object.entries(cleanData)) {
-        // Double-check that value is not undefined
-        if (value !== undefined) {
-          fields.push(`${key} = ?`);
-          values.push(value);
-        } else {
-          console.warn(`Unexpected undefined value for key: ${key}`);
-        }
-      }
-
-      // Always update updated_at (ensure it's not undefined)
-      const updatedAt = new Date();
-      if (updatedAt !== undefined) {
-        fields.push("updated_at = ?");
-        values.push(updatedAt);
-      }
-
-      // Add ID for WHERE clause (ensure it's not undefined)
-      if (id !== undefined) {
-        values.push(id);
-      } else {
-        throw new Error("Voucher ID is undefined");
-      }
-
-      // Only build query if we have fields to update
-      if (fields.length === 0) {
-        console.log("No fields to update after processing, returning early");
-        return true;
-      }
-
-      const query = `
-        UPDATE vouchers
-        SET ${fields.join(", ")}
-        WHERE id = ?
-      `;
-
-      // Final validation - ensure no undefined values in values array
-      for (let i = 0; i < values.length; i++) {
-        if (values[i] === undefined) {
-          const errorMsg = `CRITICAL: Undefined value at index ${i} in final values array`;
-          console.error(errorMsg);
-          console.error("Values array:", values);
-          throw new Error(errorMsg);
-        }
-      }
-
-      console.log("Executing query with values count:", values.length);
       const [result] = await db.execute(query, values);
-      console.log("Query executed successfully");
       return result.affectedRows > 0;
     } catch (error) {
-      console.error("Voucher update failed:", error);
-      console.error("Error stack:", error.stack);
+      if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
+        console.error("Database connection failed while updating voucher");
+        return false;
+      }
       throw error;
     }
   }
 
   // Delete voucher
   static async delete(id) {
-    const query = `
-      DELETE FROM vouchers
-      WHERE id = ?
-    `;
-
+    const query = `DELETE FROM vouchers WHERE id = ?`;
     try {
       const [result] = await db.execute(query, [id]);
       return result.affectedRows > 0;
     } catch (error) {
-      // If it's a connection error, return false
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         console.error("Database connection failed while deleting voucher");
         return false;
@@ -235,18 +206,30 @@ class VoucherRepository {
       SET used_count = used_count + 1, updated_at = ?
       WHERE id = ?
     `;
-
     try {
       const [result] = await db.execute(query, [new Date(), id]);
       return result.affectedRows > 0;
     } catch (error) {
-      // If it's a connection error, return false
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-        console.error(
-          "Database connection failed while incrementing voucher usage"
-        );
+        console.error("Database connection failed while incrementing voucher usage");
         return false;
       }
+      throw error;
+    }
+  }
+
+  // Increment voucher usage count with transaction connection
+  static async incrementUsageWithConnection(id, connection) {
+    const query = `
+      UPDATE vouchers
+      SET used_count = used_count + 1, updated_at = ?
+      WHERE id = ?
+    `;
+    try {
+      const [result] = await connection.execute(query, [new Date(), id]);
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error("Database error while incrementing voucher usage with connection:", error.message);
       throw error;
     }
   }
@@ -257,17 +240,10 @@ class VoucherRepository {
       INSERT INTO ticket_vouchers (ticket_id, voucher_id, discount_amount, created_at)
       VALUES (?, ?, ?, ?)
     `;
-
     try {
-      const [result] = await db.execute(query, [
-        ticket_id,
-        voucher_id,
-        discount_amount,
-        new Date(),
-      ]);
+      const [result] = await db.execute(query, [ticket_id, voucher_id, discount_amount, new Date()]);
       return result.insertId;
     } catch (error) {
-      // If it's a connection error, return a special error
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         throw new Error("Database connection failed");
       }
@@ -283,7 +259,6 @@ class VoucherRepository {
       JOIN ticket_vouchers tv ON v.id = tv.voucher_id
       WHERE tv.ticket_id = ?
     `;
-
     try {
       const [rows] = await db.execute(query, [ticket_id]);
       return rows.map((row) => {
@@ -292,11 +267,8 @@ class VoucherRepository {
         return voucher;
       });
     } catch (error) {
-      // If it's a connection error, return empty array
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-        console.error(
-          "Database connection failed while fetching vouchers for ticket"
-        );
+        console.error("Database connection failed while fetching vouchers for ticket");
         return [];
       }
       throw error;
@@ -309,17 +281,10 @@ class VoucherRepository {
       INSERT INTO purchase_vouchers (purchase_id, voucher_id, discount_amount, created_at)
       VALUES (?, ?, ?, ?)
     `;
-
     try {
-      const [result] = await db.execute(query, [
-        purchase_id,
-        voucher_id,
-        discount_amount,
-        new Date(),
-      ]);
+      const [result] = await db.execute(query, [purchase_id, voucher_id, discount_amount, new Date()]);
       return result.insertId;
     } catch (error) {
-      // If it's a connection error, return a special error
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         throw new Error("Database connection failed");
       }
@@ -335,7 +300,6 @@ class VoucherRepository {
       JOIN purchase_vouchers pv ON v.id = pv.voucher_id
       WHERE pv.purchase_id = ?
     `;
-
     try {
       const [rows] = await db.execute(query, [purchase_id]);
       return rows.map((row) => {
@@ -344,11 +308,8 @@ class VoucherRepository {
         return voucher;
       });
     } catch (error) {
-      // If it's a connection error, return empty array
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-        console.error(
-          "Database connection failed while fetching vouchers for purchase"
-        );
+        console.error("Database connection failed while fetching vouchers for purchase");
         return [];
       }
       throw error;
@@ -357,21 +318,13 @@ class VoucherRepository {
 
   // Check if user has already claimed a voucher
   static async hasUserClaimedVoucher(voucher_id, user_id) {
-    const query = `
-      SELECT id
-      FROM user_voucher_claims
-      WHERE voucher_id = ? AND user_id = ?
-    `;
-
+    const query = `SELECT id FROM user_voucher_claims WHERE voucher_id = ? AND user_id = ?`;
     try {
       const [rows] = await db.execute(query, [voucher_id, user_id]);
       return rows.length > 0;
     } catch (error) {
-      // If it's a connection error, return false
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-        console.error(
-          "Database connection failed while checking user voucher claim"
-        );
+        console.error("Database connection failed while checking user voucher claim");
         return false;
       }
       throw error;
@@ -380,20 +333,11 @@ class VoucherRepository {
 
   // Claim voucher for user
   static async claimVoucherForUser(voucher_id, user_id) {
-    const query = `
-      INSERT INTO user_voucher_claims (user_id, voucher_id, claimed_at)
-      VALUES (?, ?, ?)
-    `;
-
+    const query = `INSERT INTO user_voucher_claims (user_id, voucher_id, claimed_at) VALUES (?, ?, ?)`;
     try {
-      const [result] = await db.execute(query, [
-        user_id,
-        voucher_id,
-        new Date(),
-      ]);
+      const [result] = await db.execute(query, [user_id, voucher_id, new Date()]);
       return result.insertId;
     } catch (error) {
-      // If it's a connection error, return a special error
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
         throw new Error("Database connection failed");
       }
@@ -410,7 +354,6 @@ class VoucherRepository {
       WHERE uvc.user_id = ?
       ORDER BY uvc.claimed_at DESC
     `;
-
     try {
       const [rows] = await db.execute(query, [user_id]);
       return rows.map((row) => {
@@ -421,28 +364,18 @@ class VoucherRepository {
         return voucher;
       });
     } catch (error) {
-      // If it's a connection error, return empty array
       if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
-        console.error(
-          "Database connection failed while fetching user claimed vouchers"
-        );
+        console.error("Database connection failed while fetching user claimed vouchers");
         return [];
       }
       throw error;
     }
   }
 
-  // ============ VOUCHER SCOPING METHODS ============
-
   // Add products to a voucher
   static async addProductsToVoucher(voucherId, productIds) {
     if (!productIds || productIds.length === 0) return;
-
-    const query = `
-      INSERT IGNORE INTO voucher_products (voucher_id, product_id)
-      VALUES (?, ?)
-    `;
-
+    const query = `INSERT IGNORE INTO voucher_products (voucher_id, product_id) VALUES (?, ?)`;
     try {
       for (const productId of productIds) {
         await db.execute(query, [voucherId, productId]);
@@ -456,12 +389,7 @@ class VoucherRepository {
   // Add events to a voucher
   static async addEventsToVoucher(voucherId, eventIds) {
     if (!eventIds || eventIds.length === 0) return;
-
-    const query = `
-      INSERT IGNORE INTO voucher_events (voucher_id, event_id)
-      VALUES (?, ?)
-    `;
-
+    const query = `INSERT IGNORE INTO voucher_events (voucher_id, event_id) VALUES (?, ?)`;
     try {
       for (const eventId of eventIds) {
         await db.execute(query, [voucherId, eventId]);
@@ -502,7 +430,6 @@ class VoucherRepository {
       JOIN voucher_products vp ON p.id = vp.product_id
       WHERE vp.voucher_id = ? AND p.deleted_at IS NULL
     `;
-
     try {
       const [rows] = await db.execute(query, [voucherId]);
       return rows;
@@ -520,7 +447,6 @@ class VoucherRepository {
       JOIN voucher_events ve ON e.id = ve.event_id
       WHERE ve.voucher_id = ? AND e.deleted_at IS NULL
     `;
-
     try {
       const [rows] = await db.execute(query, [voucherId]);
       return rows;
@@ -532,11 +458,7 @@ class VoucherRepository {
 
   // Check if voucher applies to a specific product
   static async voucherAppliesToProduct(voucherId, productId) {
-    const query = `
-      SELECT COUNT(*) as count FROM voucher_products
-      WHERE voucher_id = ? AND product_id = ?
-    `;
-
+    const query = `SELECT COUNT(*) as count FROM voucher_products WHERE voucher_id = ? AND product_id = ?`;
     try {
       const [rows] = await db.execute(query, [voucherId, productId]);
       return rows[0].count > 0;
@@ -548,11 +470,7 @@ class VoucherRepository {
 
   // Check if voucher applies to a specific event
   static async voucherAppliesToEvent(voucherId, eventId) {
-    const query = `
-      SELECT COUNT(*) as count FROM voucher_events
-      WHERE voucher_id = ? AND event_id = ?
-    `;
-
+    const query = `SELECT COUNT(*) as count FROM voucher_events WHERE voucher_id = ? AND event_id = ?`;
     try {
       const [rows] = await db.execute(query, [voucherId, eventId]);
       return rows[0].count > 0;
@@ -575,4 +493,3 @@ class VoucherRepository {
 }
 
 module.exports = VoucherRepository;
-

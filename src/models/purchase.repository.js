@@ -179,6 +179,33 @@ class PurchaseRepository {
     }
   }
 
+  // Update purchase status with transaction connection
+  static async updateStatusWithConnection(id, status, connection) {
+    const query = `
+      UPDATE purchases
+      SET status = ?, completed_at = ?, updated_at = ?
+      WHERE id = ?
+    `;
+
+    const completedAt = status === "paid" ? new Date() : null;
+
+    try {
+      const [result] = await connection.execute(query, [
+        status,
+        completedAt,
+        new Date(),
+        id,
+      ]);
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error(
+        "Database error while updating purchase status with connection:",
+        error.message
+      );
+      throw error; // Throw so transaction can rollback
+    }
+  }
+
   // Find pending purchase by user ID and product ID
   // This is used to consolidate orders instead of creating duplicates
   static async findPendingByUserAndProduct(userId, productId) {
