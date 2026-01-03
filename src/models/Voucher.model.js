@@ -1,5 +1,34 @@
 // Voucher model for MySQL database
 
+/**
+ * Convert a date to Jakarta timezone (UTC+7)
+ * @param {string|Date} dateInput - The date to convert
+ * @returns {Date} - Date adjusted to Jakarta timezone
+ */
+const toJakartaTimezone = (dateInput) => {
+  if (!dateInput) return null;
+
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return null;
+
+  // If the input is a date-only string (YYYY-MM-DD), treat it as Jakarta midnight
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    // Parse as Jakarta time (UTC+7) - subtract 7 hours to get UTC equivalent
+    const [year, month, day] = dateInput.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, -7, 0, 0, 0));
+  }
+
+  // For datetime strings without timezone, assume Jakarta timezone
+  if (typeof dateInput === 'string' && !dateInput.includes('Z') && !dateInput.includes('+') && !dateInput.includes('-', 10)) {
+    // Input has no timezone info, treat as Jakarta time
+    const jakartaOffset = 7 * 60; // Jakarta is UTC+7 (in minutes)
+    const utcDate = new Date(date.getTime() - jakartaOffset * 60 * 1000);
+    return utcDate;
+  }
+
+  return date;
+};
+
 class Voucher {
   constructor(data) {
     this.id = data.id || null;
@@ -15,8 +44,9 @@ class Voucher {
     this.min_order_value = data.min_order_value
       ? parseFloat(data.min_order_value)
       : null;
-    this.valid_from = data.valid_from;
-    this.valid_until = data.valid_until;
+    // Convert dates to Jakarta timezone (UTC+7)
+    this.valid_from = toJakartaTimezone(data.valid_from);
+    this.valid_until = toJakartaTimezone(data.valid_until);
     this.is_active = data.is_active !== undefined ? data.is_active : true;
     this.apply_to_all = data.apply_to_all !== undefined ? data.apply_to_all : true; // Default: apply to all
     this.voucher_type = data.voucher_type || "general"; // 'product', 'event', 'shipping', or 'general'
