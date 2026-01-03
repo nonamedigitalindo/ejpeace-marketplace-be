@@ -49,5 +49,8 @@ router.put("/scoped/:id", authenticate, voucherController.updateVoucherWithScopi
 // Validate voucher for specific items
 router.post("/validate-for-items", authenticate, voucherController.validateVoucherForItems);
 
+// Validate voucher usage (public endpoint)
+router.post("/validate-usage", voucherController.validateVoucherUsage);
+
 module.exports = router;
 

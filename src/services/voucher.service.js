@@ -1,5 +1,7 @@
 const VoucherRepository = require("../models/voucher.repository");
 const Voucher = require("../models/Voucher.model");
+const ProductRepository = require("../models/product.repository");
+const EventRepository = require("../models/event.repository");
 
 const createVoucher = async (voucherData) => {
   try {
@@ -524,6 +526,154 @@ const validateVoucherForItems = async (code, orderAmount, productIds = [], event
   }
 };
 
+/**
+ * Validate voucher usage with product/event price lookup from database
+ * @param {string} code - Voucher code
+ * @param {Array} productIds - Array of product IDs
+ * @param {Array} eventIds - Array of event IDs
+ */
+const validateVoucherUsage = async (code, productIds = [], eventIds = []) => {
+  try {
+    // Find voucher by code
+    const voucher = await VoucherRepository.findByCode(code);
+    if (!voucher) {
+      return {
+        valid: false,
+        error: "Voucher not found",
+      };
+    }
+
+    // Check if voucher is active
+    if (!voucher.is_active) {
+      return {
+        valid: false,
+        error: "Voucher is not active",
+      };
+    }
+
+    // Check valid_from date
+    const now = new Date();
+    if (now < new Date(voucher.valid_from)) {
+      return {
+        valid: false,
+        error: "Voucher is not yet valid",
+      };
+    }
+
+    // Check valid_until date
+    if (now > new Date(voucher.valid_until)) {
+      return {
+        valid: false,
+        error: "Voucher has expired",
+      };
+    }
+
+    // Check usage limit (used_count vs max_usage)
+    if (voucher.max_usage !== null && voucher.used_count >= voucher.max_usage) {
+      return {
+        valid: false,
+        error: "Voucher usage limit reached",
+      };
+    }
+
+    // Fetch prices from database and check scoping
+    let totalAmount = 0;
+    const eligibleProductIds = [];
+    const eligibleEventIds = [];
+
+    const voucherType = voucher.voucher_type;
+    const applyToAll = voucher.apply_to_all === 1 || voucher.apply_to_all === true;
+
+    // Process products
+    for (const productId of productIds) {
+      const product = await ProductRepository.findById(productId);
+      if (product) {
+        const price = parseFloat(product.price) || 0;
+
+        if (applyToAll || voucherType !== "product") {
+          // If apply_to_all or not a product voucher, all products are eligible
+          totalAmount += price;
+          eligibleProductIds.push(productId);
+        } else {
+          // Check if this specific product is in voucher scope
+          const applies = await VoucherRepository.voucherAppliesToProduct(voucher.id, productId);
+          if (applies) {
+            totalAmount += price;
+            eligibleProductIds.push(productId);
+          }
+        }
+      }
+    }
+
+    // Process events
+    for (const eventId of eventIds) {
+      const event = await EventRepository.findById(eventId);
+      if (event) {
+        const price = parseFloat(event.price) || 0;
+
+        if (applyToAll || voucherType !== "event") {
+          // If apply_to_all or not an event voucher, all events are eligible
+          totalAmount += price;
+          eligibleEventIds.push(eventId);
+        } else {
+          // Check if this specific event is in voucher scope
+          const applies = await VoucherRepository.voucherAppliesToEvent(voucher.id, eventId);
+          if (applies) {
+            totalAmount += price;
+            eligibleEventIds.push(eventId);
+          }
+        }
+      }
+    }
+
+    // Check if there are any eligible items for scoped vouchers
+    if (!applyToAll) {
+      if (voucherType === "product" && eligibleProductIds.length === 0) {
+        return {
+          valid: false,
+          error: "This voucher does not apply to any products in your cart",
+        };
+      }
+      if (voucherType === "event" && eligibleEventIds.length === 0) {
+        return {
+          valid: false,
+          error: "This voucher does not apply to any events in your order",
+        };
+      }
+    }
+
+    // Check minimum order value
+    if (voucher.min_order_value && totalAmount < voucher.min_order_value) {
+      return {
+        valid: false,
+        error: `Minimum order value of ${voucher.min_order_value} is required`,
+      };
+    }
+
+    // Calculate discount
+    const discountAmount = voucher.calculateDiscount(totalAmount);
+    const remainingUsage = voucher.max_usage !== null
+      ? voucher.max_usage - voucher.used_count
+      : null;
+
+    return {
+      valid: true,
+      voucher: voucher.toJSON(),
+      total_amount: totalAmount,
+      discount_amount: discountAmount,
+      final_amount: totalAmount - discountAmount,
+      remaining_usage: remainingUsage,
+      eligible_product_ids: eligibleProductIds,
+      eligible_event_ids: eligibleEventIds,
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      error: error.message,
+    };
+  }
+};
+
 module.exports = {
   createVoucher,
   getVoucherById,
@@ -540,5 +690,6 @@ module.exports = {
   getVoucherWithScoping,
   updateVoucherWithScoping,
   validateVoucherForItems,
+  validateVoucherUsage,
 };
 

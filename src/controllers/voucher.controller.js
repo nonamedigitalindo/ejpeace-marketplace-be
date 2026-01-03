@@ -372,6 +372,67 @@ const validateVoucherForItems = async (req, res) => {
   }
 };
 
+/**
+ * Validate voucher usage with product/event lookup
+ * Public endpoint - no authentication required
+ */
+const validateVoucherUsage = async (req, res) => {
+  try {
+    const { code, product_ids, event_ids } = req.body;
+
+    // Validate that request body exists
+    if (!req.body || Object.keys(req.body).length === 0) {
+      return validationErrorResponse(res, ["Request body is required"]);
+    }
+
+    // Validate required fields
+    if (!code) {
+      return validationErrorResponse(res, ["Voucher code is required"]);
+    }
+
+    // Ensure at least one of product_ids or event_ids is provided
+    const productIds = product_ids || [];
+    const eventIds = event_ids || [];
+
+    if (productIds.length === 0 && eventIds.length === 0) {
+      return validationErrorResponse(res, [
+        "At least one product_id or event_id is required",
+      ]);
+    }
+
+    // Validate that product_ids and event_ids are arrays
+    if (!Array.isArray(productIds)) {
+      return validationErrorResponse(res, ["product_ids must be an array"]);
+    }
+
+    if (!Array.isArray(eventIds)) {
+      return validationErrorResponse(res, ["event_ids must be an array"]);
+    }
+
+    const validation = await voucherService.validateVoucherUsage(
+      code,
+      productIds,
+      eventIds
+    );
+
+    if (!validation.valid) {
+      return errorResponse(
+        res,
+        "Voucher validation failed",
+        validation.error,
+        400
+      );
+    }
+
+    return successResponse(res, "Voucher is valid", validation);
+  } catch (error) {
+    if (error.message.includes("Service unavailable")) {
+      return serviceUnavailableResponse(res, "Failed to validate voucher");
+    }
+    return errorResponse(res, "Failed to validate voucher", error.message, 400);
+  }
+};
+
 module.exports = {
   createVoucher,
   getVoucherById,
@@ -388,5 +449,6 @@ module.exports = {
   getVoucherWithScopingById,
   updateVoucherWithScoping,
   validateVoucherForItems,
+  validateVoucherUsage,
 };
 
