@@ -305,10 +305,20 @@ const getPurchaseDetails = async (purchaseId) => {
     if (cartItems.length === 0 && purchase.product_id) {
       const product = await ProductRepository.findById(purchase.product_id);
       if (product) {
-        // Calculate quantity from total_amount / price
+        // CRITICAL: Use STORED quantity from purchase record, NOT calculated from total_amount
+        // This ensures voucher discount NEVER affects displayed quantity
+        // Using purchase.quantity as the single source of truth
+        let quantity = purchase.quantity;
+
+        // For display purposes, fallback to 1 if not stored (legacy data)
+        // This is safer than calculating from total_amount which includes discounts
+        if (!quantity || quantity <= 0) {
+          console.warn(`[getPurchaseDetails] Warning: No stored quantity for purchase ${purchaseId}, defaulting to 1`);
+          quantity = 1;
+        }
+
         const productPrice = parseFloat(product.price);
         const totalAmount = parseFloat(purchase.total_amount);
-        const quantity = productPrice > 0 ? Math.max(1, Math.floor(totalAmount / productPrice)) : 1;
 
         cartItems = [{
           product_id: purchase.product_id,

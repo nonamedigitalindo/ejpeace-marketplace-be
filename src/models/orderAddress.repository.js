@@ -7,6 +7,7 @@ class OrderAddressRepository {
       purchase_id,
       ticket_id,
       product_id,
+      quantity, // CRITICAL: Store quantity at checkout
       full_name,
       phone,
       address_line1,
@@ -20,8 +21,8 @@ class OrderAddressRepository {
     const updatedAt = new Date();
 
     const query = `
-      INSERT INTO order_addresses (purchase_id, ticket_id, product_id, full_name, phone, address_line1, address_line2, city, state, postal_code, country, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO order_addresses (purchase_id, ticket_id, product_id, quantity, full_name, phone, address_line1, address_line2, city, state, postal_code, country, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
@@ -29,6 +30,7 @@ class OrderAddressRepository {
         purchase_id || null,
         ticket_id || null,
         product_id || null,
+        quantity || 1, // Default to 1 if not provided
         full_name,
         phone,
         address_line1,

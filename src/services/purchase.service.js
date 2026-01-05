@@ -168,9 +168,14 @@ const createPurchaseFromCart = async (
     const firstProductId =
       cartItems.length > 0 ? cartItems[0].product_id : null;
 
+    // Calculate total quantity from all cart items
+    const totalQuantity = cartItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
     const purchaseData = {
       user_id: userId,
       product_id: firstProductId, // Add product_id to purchase record
+      quantity: totalQuantity, // CRITICAL: Store quantity at checkout (immutable)
+      original_amount: totalAmount, // Store original amount BEFORE voucher discount
       total_amount: finalAmount,
       status: "pending",
     };
@@ -207,6 +212,7 @@ const createPurchaseFromCart = async (
     const addressData = {
       purchase_id: purchaseId,
       product_id: firstProductId,
+      quantity: totalQuantity, // CRITICAL: Store quantity at checkout
       full_name: full_name,
       phone: phone,
       address_line1: address_line1,
@@ -331,9 +337,20 @@ const createPurchaseDirect = async (
       }
     }
 
+    // Get quantity from purchaseData (should be explicitly provided)
+    // CRITICAL: quantity MUST be provided, not calculated from amount
+    const quantity = purchaseData.quantity || 1;
+
+    // Validate quantity is a positive integer
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new Error("INVALID QUANTITY: Quantity must be a positive integer");
+    }
+
     const purchaseRecordData = {
       user_id: userId,
       product_id: productId,
+      quantity: quantity, // CRITICAL: Store quantity at checkout (immutable)
+      original_amount: totalAmount, // Store original amount BEFORE voucher discount
       total_amount: finalAmount,
       status: "pending",
     };
@@ -366,6 +383,7 @@ const createPurchaseDirect = async (
     const addressData = {
       purchase_id: purchaseId,
       product_id: productId,
+      quantity: quantity, // CRITICAL: Store quantity at checkout
       full_name: full_name,
       phone: phone,
       address_line1: address_line1,
@@ -871,7 +889,7 @@ const handleInvoiceCallback = async (callbackData) => {
         // 1. Get Cart Items
         cartItems = await CartRepository.getCartItemsByPurchaseId(lockedPurchase.id);
 
-        // Fallback 1: Order Addresses
+        // Fallback 1: Order Addresses (uses STORED quantity, not calculated)
         if (!cartItems || cartItems.length === 0) {
           try {
             const OrderAddressRepository = require("../models/orderAddress.repository");
@@ -879,19 +897,40 @@ const handleInvoiceCallback = async (callbackData) => {
             if (orderAddress && orderAddress.product_id) {
               const product = await ProductRepository.findById(orderAddress.product_id);
               if (product) {
-                const totalAmount = parseFloat(lockedPurchase.total_amount);
-                const productPrice = parseFloat(product.price);
-                const quantity = Math.max(1, Math.floor(totalAmount / productPrice));
+                // CRITICAL: Use STORED quantity from order_addresses or purchase, NOT calculated
+                // This prevents voucher discount from affecting inventory
+                let quantity = orderAddress.quantity || lockedPurchase.quantity;
+
+                // FAIL FAST: If no stored quantity exists, this is a data integrity issue
+                if (!quantity || quantity <= 0) {
+                  console.error(`[Invoice Callback] ❌ CRITICAL: No stored quantity found for purchase ${lockedPurchase.id}`);
+                  const error = new Error(`CRITICAL: Quantity missing for purchase_id ${lockedPurchase.id}. Cannot proceed with inventory deduction. Data integrity issue.`);
+                  error.code = "QUANTITY_MISSING";
+                  throw error;
+                }
+
+                // Guard: Validate quantity is positive integer
+                if (!Number.isInteger(quantity) || quantity <= 0) {
+                  console.error(`[Invoice Callback] ❌ INVALID QUANTITY: ${quantity} for purchase ${lockedPurchase.id}`);
+                  const error = new Error(`INVALID QUANTITY: Inventory operation blocked for purchase ${lockedPurchase.id}`);
+                  error.code = "INVALID_QUANTITY";
+                  throw error;
+                }
+
                 cartItems = [{
                   product_id: orderAddress.product_id,
                   quantity: quantity,
                   product_name: product.name,
                   product_category: product.category
                 }];
-                console.log(`[Invoice Callback] Used order_addresses fallback.`);
+                console.log(`[Invoice Callback] ✅ Used order_addresses with STORED quantity: ${quantity}`);
               }
             }
           } catch (err) {
+            // Re-throw critical errors, only warn for non-critical
+            if (err.code === "QUANTITY_MISSING" || err.code === "INVALID_QUANTITY") {
+              throw err;
+            }
             console.warn(`[Invoice Callback] order_addresses fallback failed: ${err.message}`);
           }
         }
@@ -941,12 +980,31 @@ const handleInvoiceCallback = async (callbackData) => {
         }
 
         // 3. Handle Direct Purchase Stock Reduction (Transactional)
+        // CRITICAL: Use STORED quantity from purchase record, NOT calculated from amount
         if ((!cartItems || cartItems.length === 0) && lockedPurchase.product_id) {
           const product = await ProductRepository.findById(lockedPurchase.product_id);
           if (product) {
-            const totalAmount = parseFloat(lockedPurchase.total_amount);
-            const productPrice = parseFloat(product.price);
-            const quantity = Math.floor(totalAmount / productPrice);
+            // CRITICAL: Use stored quantity from purchase, NOT calculated from total_amount
+            // This ensures voucher discount NEVER affects inventory
+            const quantity = lockedPurchase.quantity;
+
+            // FAIL FAST: If no stored quantity, this is a critical data integrity issue
+            if (!quantity || quantity <= 0) {
+              console.error(`[Invoice Callback] ❌ CRITICAL: No stored quantity for direct purchase ${lockedPurchase.id}`);
+              const error = new Error(`CRITICAL: Quantity missing for direct purchase_id ${lockedPurchase.id}. Cannot proceed with inventory deduction.`);
+              error.code = "QUANTITY_MISSING";
+              throw error;
+            }
+
+            // Guard: Validate quantity is positive integer
+            if (!Number.isInteger(quantity) || quantity <= 0) {
+              console.error(`[Invoice Callback] ❌ INVALID QUANTITY: ${quantity} for direct purchase ${lockedPurchase.id}`);
+              const error = new Error(`INVALID QUANTITY: Inventory operation blocked for purchase ${lockedPurchase.id}`);
+              error.code = "INVALID_QUANTITY";
+              throw error;
+            }
+
+            console.log(`[Invoice Callback] 📦 Direct purchase using STORED quantity: ${quantity}`);
 
             const stockReduced = await ProductRepository.updateQuantityWithConnection(
               lockedPurchase.product_id,
@@ -955,7 +1013,7 @@ const handleInvoiceCallback = async (callbackData) => {
             );
 
             if (stockReduced) {
-              console.log(`[Invoice Callback] 📉 Direct purchase stock reduced`);
+              console.log(`[Invoice Callback] 📉 Direct purchase stock reduced by ${quantity}`);
             } else {
               console.error(`[Invoice Callback] ❌ Insufficient stock for direct purchase (Product: ${lockedPurchase.product_id})`);
               const error = new Error(`Insufficient stock for product ${lockedPurchase.product_id}`);

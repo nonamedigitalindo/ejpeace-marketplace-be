@@ -7,6 +7,8 @@ class PurchaseRepository {
     const {
       user_id,
       product_id,
+      quantity, // CRITICAL: Store quantity at checkout for inventory integrity
+      original_amount, // Store original amount before voucher discount
       total_amount,
       status,
       payment_id,
@@ -16,14 +18,16 @@ class PurchaseRepository {
     const updatedAt = new Date();
 
     const query = `
-      INSERT INTO purchases (user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO purchases (user_id, product_id, quantity, original_amount, total_amount, status, payment_id, external_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
       const [result] = await db.execute(query, [
         user_id,
         product_id || null, // Handle undefined product_id
+        quantity || 1, // Default to 1 if not provided
+        original_amount || total_amount, // Default to total_amount if not provided
         total_amount,
         status,
         payment_id || null, // Handle undefined payment_id,
@@ -45,7 +49,7 @@ class PurchaseRepository {
   static async findById(id) {
     console.log(`[PurchaseRepository] Finding purchase by ID: ${id}`);
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, product_id, quantity, original_amount, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE id = ?
     `;
@@ -83,7 +87,7 @@ class PurchaseRepository {
   // Find purchase by payment ID
   static async findByPaymentId(paymentId) {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, product_id, quantity, original_amount, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE payment_id = ?
     `;
@@ -107,7 +111,7 @@ class PurchaseRepository {
   // Get all purchases for a user
   static async findByUserId(userId) {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, product_id, quantity, original_amount, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -210,7 +214,7 @@ class PurchaseRepository {
   // This is used to consolidate orders instead of creating duplicates
   static async findPendingByUserAndProduct(userId, productId) {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, product_id, quantity, original_amount, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       WHERE user_id = ? AND product_id = ? AND status = 'pending'
       ORDER BY created_at DESC
@@ -235,7 +239,7 @@ class PurchaseRepository {
   // Get all purchases (for admin view)
   static async findAll() {
     const query = `
-      SELECT id, user_id, product_id, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
+      SELECT id, user_id, product_id, quantity, original_amount, total_amount, status, payment_id, external_id, created_at, updated_at, completed_at
       FROM purchases
       ORDER BY created_at DESC
     `;

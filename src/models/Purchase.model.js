@@ -5,6 +5,8 @@ class Purchase {
     this.id = data.id || null;
     this.user_id = data.user_id;
     this.product_id = data.product_id || null;
+    this.quantity = data.quantity || 1; // CRITICAL: Stored quantity for inventory integrity
+    this.original_amount = data.original_amount || null; // Amount before voucher discount
     this.total_amount = data.total_amount;
     this.status = data.status || "pending"; // pending, paid, cancelled, shipped, completed
     this.payment_id = data.payment_id || null;
@@ -49,6 +51,8 @@ class Purchase {
       id: this.id,
       user_id: this.user_id,
       product_id: this.product_id,
+      quantity: this.quantity,
+      original_amount: this.original_amount,
       total_amount: this.total_amount,
       status: this.status,
       payment_id: this.payment_id,

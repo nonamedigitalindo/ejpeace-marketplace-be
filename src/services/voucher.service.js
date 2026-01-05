@@ -151,6 +151,19 @@ const deleteVoucher = async (id) => {
     throw new Error("Failed to delete voucher: " + error.message);
   }
 };
+/**
+ * Validate a voucher against an order
+ * 
+ * CRITICAL: orderAmount must be the TOTAL ORDER SUBTOTAL, calculated as:
+ * subtotal = Σ (item.quantity × item.unit_price)
+ * 
+ * ❌ WRONG: Passing single item price (e.g., ticket.price, product.price)
+ * ✅ CORRECT: Passing total order amount (e.g., 4 tickets × 100k = 400k)
+ * 
+ * @param {string} code - Voucher code
+ * @param {number} orderAmount - TOTAL ORDER SUBTOTAL (quantity × unit_price for all items)
+ * @returns {Object} Validation result with discount calculation
+ */
 const validateVoucher = async (code, orderAmount) => {
   try {
     // Find voucher by code
@@ -163,10 +176,11 @@ const validateVoucher = async (code, orderAmount) => {
     if (!validity.valid) {
       throw new Error(validity.reason);
     }
-    // Check if order amount meets minimum requirement
+    // CRITICAL: min_order_value is checked against the TOTAL ORDER SUBTOTAL
+    // NOT against individual item prices
     if (voucher.min_order_value && orderAmount < voucher.min_order_value) {
       throw new Error(
-        `Minimum order value of ${voucher.min_order_value} is required to use this voucher`
+        `Minimum order value of ${voucher.min_order_value} is required to use this voucher. Your order total: ${orderAmount}`
       );
     }
     // Calculate discount
@@ -188,7 +202,20 @@ const validateVoucher = async (code, orderAmount) => {
     };
   }
 };
-const applyVoucherToTicket = async (ticket_id, voucher_code) => {
+/**
+ * Apply voucher to a ticket purchase
+ * 
+ * CRITICAL: This function now requires the TOTAL ORDER AMOUNT to be passed
+ * for proper minimum order validation.
+ * 
+ * The totalOrderAmount should be calculated as:
+ * totalOrderAmount = Σ (ticket.quantity × ticket.price) for all tickets in order
+ * 
+ * @param {number} ticket_id - The ticket ID to apply voucher to
+ * @param {string} voucher_code - The voucher code
+ * @param {number} totalOrderAmount - TOTAL ORDER AMOUNT (all tickets × prices)
+ */
+const applyVoucherToTicket = async (ticket_id, voucher_code, totalOrderAmount = null) => {
   try {
     // Get ticket service to get ticket details
     const ticketService = require("./ticket.service");
@@ -196,31 +223,57 @@ const applyVoucherToTicket = async (ticket_id, voucher_code) => {
     if (!ticket) {
       throw new Error("Ticket not found");
     }
-    // Validate voucher
-    const validation = await validateVoucher(voucher_code, ticket.price);
+
+    // CRITICAL: Use totalOrderAmount if provided, otherwise use ticket price
+    // For proper minimum order validation, totalOrderAmount SHOULD be provided
+    // If not provided, we log a warning as this may cause incorrect validation
+    let orderAmountForValidation = totalOrderAmount;
+    if (!orderAmountForValidation || orderAmountForValidation <= 0) {
+      console.warn(
+        `[applyVoucherToTicket] WARNING: totalOrderAmount not provided for ticket ${ticket_id}. ` +
+        `Using single ticket price ${ticket.price} which may cause incorrect minimum order validation. ` +
+        `Please update frontend to pass total order amount.`
+      );
+      orderAmountForValidation = ticket.price;
+    }
+
+    // Validate voucher against the ORDER TOTAL, not individual item price
+    const validation = await validateVoucher(voucher_code, orderAmountForValidation);
     if (!validation.valid) {
       throw new Error(validation.error);
     }
+
+    // Calculate discount proportionally for this ticket if multiple tickets
+    let discountForThisTicket = validation.discount_amount;
+    if (totalOrderAmount && totalOrderAmount > ticket.price) {
+      // Proportional discount: (ticket_price / total) × discount
+      discountForThisTicket = (ticket.price / totalOrderAmount) * validation.discount_amount;
+    }
+
     // Associate voucher with ticket
     const associationId = await VoucherRepository.associateWithTicket(
       ticket_id,
       validation.voucher.id,
-      validation.discount_amount
+      discountForThisTicket
     );
     // Increment voucher usage count
     await VoucherRepository.incrementUsage(validation.voucher.id);
 
-    // Update ticket price
+    // Update ticket price with proportional discount
+    const finalTicketPrice = Math.max(0, ticket.price - discountForThisTicket);
     const updatedTicket = await ticketService.updateTicketPrice(
       ticket_id,
-      validation.final_amount
+      finalTicketPrice
     );
     return {
       message: "Voucher applied successfully",
       ticket: updatedTicket,
       voucher: validation.voucher,
-      discount_amount: validation.discount_amount,
-      final_amount: validation.final_amount,
+      discount_amount: discountForThisTicket,
+      final_amount: finalTicketPrice,
+      // Include full order context
+      order_total_discount: validation.discount_amount,
+      order_final_amount: validation.final_amount,
     };
   } catch (error) {
     if (error.message === "Database connection failed") {
@@ -438,8 +491,12 @@ const updateVoucherWithScoping = async (id, voucherData) => {
 
 /**
  * Validate if voucher applies to given items (products or events)
+ * 
+ * CRITICAL: orderAmount must be the TOTAL ORDER SUBTOTAL:
+ * subtotal = Σ (item.quantity × item.unit_price) for ALL items
+ * 
  * @param {string} code - Voucher code
- * @param {number} orderAmount - Total order amount
+ * @param {number} orderAmount - TOTAL ORDER SUBTOTAL (not individual item price!)
  * @param {Array} productIds - Array of product IDs in cart
  * @param {Array} eventIds - Array of event IDs in tickets
  */
@@ -457,10 +514,10 @@ const validateVoucherForItems = async (code, orderAmount, productIds = [], event
       throw new Error(validity.reason);
     }
 
-    // Check minimum order value
+    // CRITICAL: min_order_value checks TOTAL ORDER, not individual items
     if (voucher.min_order_value && orderAmount < voucher.min_order_value) {
       throw new Error(
-        `Minimum order value of ${voucher.min_order_value} is required`
+        `Minimum order value of ${voucher.min_order_value} is required. Your order total: ${orderAmount}`
       );
     }
 

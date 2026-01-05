@@ -182,7 +182,7 @@ const validateVoucher = async (req, res) => {
 
 const applyVoucherToTicket = async (req, res) => {
   try {
-    const { ticket_id, voucher_code } = req.body;
+    const { ticket_id, voucher_code, total_order_amount } = req.body;
 
     // Validate that request body exists
     if (!req.body || Object.keys(req.body).length === 0) {
@@ -198,9 +198,12 @@ const applyVoucherToTicket = async (req, res) => {
       return validationErrorResponse(res, ["Voucher code is required"]);
     }
 
+    // CRITICAL: Pass total_order_amount for proper minimum order validation
+    // Frontend should calculate: total = quantity × ticket_price
     const result = await voucherService.applyVoucherToTicket(
       ticket_id,
-      voucher_code
+      voucher_code,
+      total_order_amount || null
     );
 
     return successResponse(res, "Voucher applied successfully", result);

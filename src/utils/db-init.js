@@ -1063,6 +1063,116 @@ const createEventImagesTable = async () => {
   }
 };
 
+// Add quantity column to purchases table - CRITICAL for inventory integrity
+// This ensures quantity is STORED at checkout, not derived from total_amount
+const addQuantityToPurchasesTable = async () => {
+  try {
+    const [rows] = await db.execute(
+      `
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = ? 
+      AND TABLE_NAME = 'purchases' 
+      AND COLUMN_NAME = 'quantity'
+      `,
+      [process.env.DB_NAME || "peacetifal_db"]
+    );
+
+    if (rows.length === 0) {
+      const query = `
+        ALTER TABLE purchases 
+        ADD COLUMN quantity INT DEFAULT 1 AFTER product_id
+      `;
+
+      await db.execute(query);
+      console.log("Quantity column added to purchases table");
+      return true;
+    } else {
+      console.log("Quantity column already exists in purchases table");
+      return true;
+    }
+  } catch (error) {
+    console.error(
+      "Error adding quantity column to purchases table:",
+      error.message
+    );
+    return false;
+  }
+};
+
+// Add original_amount column to purchases table - stores amount BEFORE voucher discount
+// This allows correct calculation if fallback is ever needed
+const addOriginalAmountToPurchasesTable = async () => {
+  try {
+    const [rows] = await db.execute(
+      `
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = ? 
+      AND TABLE_NAME = 'purchases' 
+      AND COLUMN_NAME = 'original_amount'
+      `,
+      [process.env.DB_NAME || "peacetifal_db"]
+    );
+
+    if (rows.length === 0) {
+      const query = `
+        ALTER TABLE purchases 
+        ADD COLUMN original_amount DECIMAL(12, 2) NULL AFTER total_amount
+      `;
+
+      await db.execute(query);
+      console.log("Original amount column added to purchases table");
+      return true;
+    } else {
+      console.log("Original amount column already exists in purchases table");
+      return true;
+    }
+  } catch (error) {
+    console.error(
+      "Error adding original_amount column to purchases table:",
+      error.message
+    );
+    return false;
+  }
+};
+
+// Add quantity column to order_addresses table for single source of truth
+const addQuantityToOrderAddressesTable = async () => {
+  try {
+    const [rows] = await db.execute(
+      `
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = ? 
+      AND TABLE_NAME = 'order_addresses' 
+      AND COLUMN_NAME = 'quantity'
+      `,
+      [process.env.DB_NAME || "peacetifal_db"]
+    );
+
+    if (rows.length === 0) {
+      const query = `
+        ALTER TABLE order_addresses 
+        ADD COLUMN quantity INT DEFAULT 1 AFTER product_id
+      `;
+
+      await db.execute(query);
+      console.log("Quantity column added to order_addresses table");
+      return true;
+    } else {
+      console.log("Quantity column already exists in order_addresses table");
+      return true;
+    }
+  } catch (error) {
+    console.error(
+      "Error adding quantity column to order_addresses table:",
+      error.message
+    );
+    return false;
+  }
+};
+
 // Add product_id column to existing purchases table
 const addProductIdToPurchasesTable = async () => {
   try {
@@ -1144,6 +1254,9 @@ const initializeDatabase = async () => {
     await addTicketIdToOrderAddressesTable(); // Add ticket support to order addresses
     await addExternalIdToPurchasesTable(); // Add external_id for Xendit tracking
     await addProductIdToPurchasesTable(); // Add product_id for purchase product reference
+    await addQuantityToPurchasesTable(); // CRITICAL: Add quantity for inventory integrity
+    await addOriginalAmountToPurchasesTable(); // Add original_amount before voucher discount
+    await addQuantityToOrderAddressesTable(); // Add quantity to order_addresses
     await createEventImagesTable(); // Create event images table for unlimited images per event
 
     console.log("Database initialization completed");
